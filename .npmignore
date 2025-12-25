@@ -1,0 +1,18 @@
+# Source files
+src/
+tsconfig.json
+
+# Tests
+**/__tests__/
+*.test.ts
+*.spec.ts
+
+# Dev files
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# Misc
+*.log
+*.tgz
