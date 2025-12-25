@@ -1,8 +1,10 @@
 /**
- * AI Tools - AI-powered code analysis tools
+ * AI Tools - MCP server for AI-powered JSVMP detection
  * 
- * This package provides LLM-driven functionality for code analysis,
+ * This package provides an MCP server with LLM-driven functionality for code analysis,
  * including JSVMP (JavaScript Virtual Machine Protection) detection.
+ * 
+ * Run as MCP server: npx @reverse-craft/ai-tools
  * 
  * @packageDocumentation
  */
@@ -29,3 +31,8 @@ export {
   parseDetectionResult,
   findJsvmpDispatcher,
 } from './jsvmpDetector.js';
+
+// MCP Tool Definitions
+export { tools } from './tools/index.js';
+export { findJsvmpDispatcherTool, FindJsvmpDispatcherInputSchema } from './tools/findJsvmpDispatcherTool.js';
+export { ToolDefinition, defineTool } from './tools/ToolDefinition.js';

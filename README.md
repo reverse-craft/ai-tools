@@ -1,12 +1,13 @@
 # @reverse-craft/ai-tools
 
-AI-powered code analysis tools for smart-fs. Provides LLM-driven functionality including JSVMP (JavaScript Virtual Machine Protection) dispatcher detection.
+MCP server for AI-powered JSVMP detection. Provides LLM-driven code analysis tools for identifying JavaScript Virtual Machine Protection patterns.
 
 ## Features
 
+- **MCP Server** - Model Context Protocol server for AI assistant integration
 - **JSVMP Detection** - Detect VM protection patterns using LLM analysis
-- **LLM Configuration** - Flexible OpenAI-compatible API configuration
-- **Code Formatting** - Format code for LLM analysis with source map coordinates
+- **Multiple Pattern Types** - Identifies dispatchers, instruction arrays, stack operations
+- **Confidence Levels** - Results include ultra_high, high, medium, low confidence ratings
 
 ## Installation
 
@@ -24,106 +25,115 @@ export OPENAI_API_KEY=your-api-key
 
 # Optional (defaults shown)
 export OPENAI_BASE_URL=https://api.openai.com/v1
-export OPENAI_MODEL=gpt-4
+export OPENAI_MODEL=gpt-4o-mini
 ```
 
-## Usage
+## MCP Server Usage
 
-### JSVMP Dispatcher Detection
+### Running the Server
 
-```typescript
-import { findJsvmpDispatcher } from '@reverse-craft/ai-tools';
+```bash
+# Via npx
+npx @reverse-craft/ai-tools
 
-const result = await findJsvmpDispatcher(
-  './obfuscated.js',
-  1,      // startLine
-  500,    // endLine
-  { charLimit: 300 }
-);
+# Or if installed globally
+ai-tools-mcp
+```
 
-if (result.success) {
-  console.log(result.formattedOutput);
-  // Detected regions with confidence levels
-  for (const region of result.result.regions) {
-    console.log(`[${region.confidence}] Lines ${region.start}-${region.end}: ${region.type}`);
+### MCP Configuration
+
+Add to your MCP client configuration (e.g., Claude Desktop, Kiro):
+
+```json
+{
+  "mcpServers": {
+    "ai-tools": {
+      "command": "npx",
+      "args": ["@reverse-craft/ai-tools"],
+      "env": {
+        "OPENAI_API_KEY": "your-api-key"
+      }
+    }
   }
 }
 ```
 
-### LLM Configuration
+Or with a local installation:
 
-```typescript
-import { getLLMConfig, isLLMConfigured, createLLMClient } from '@reverse-craft/ai-tools';
-
-// Check if LLM is configured
-if (isLLMConfigured()) {
-  const config = getLLMConfig();
-  const client = createLLMClient(config);
+```json
+{
+  "mcpServers": {
+    "ai-tools": {
+      "command": "node",
+      "args": ["/path/to/ai-tools/dist/server.js"],
+      "env": {
+        "OPENAI_API_KEY": "your-api-key"
+      }
+    }
+  }
 }
 ```
 
-### Code Formatting for Analysis
+## MCP Tools
 
-```typescript
-import { formatCodeForAnalysis } from '@reverse-craft/ai-tools';
+### find_jsvmp_dispatcher
 
-const formatted = await formatCodeForAnalysis(
-  './app.min.js',
-  1,      // startLine
-  100,    // endLine
-  300     // charLimit
-);
+Detect JSVMP (JavaScript Virtual Machine Protection) patterns in code using LLM analysis.
 
-console.log(formatted.content);
-// Output: "LineNo SourceLoc Code" format
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| filePath | string | Yes | Path to the JavaScript file to analyze |
+| startLine | number | Yes | Start line number (1-based) |
+| endLine | number | Yes | End line number (1-based) |
+| charLimit | number | No | Character limit for string truncation (default: 300) |
+
+**Detection Types:**
+
+- **If-Else Dispatcher** - Nested if-else chains for instruction dispatch
+- **Switch Dispatcher** - Large switch statements (>20 cases) for opcode handling
+- **Instruction Array** - Arrays storing bytecode instructions
+- **Stack Operation** - Virtual stack push/pop patterns
+
+**Confidence Levels:**
+
+- `ultra_high` - Multiple JSVMP features present (loop + dispatcher + stack)
+- `high` - Clear dispatcher structure (>20 cases or >10 nesting levels)
+- `medium` - Partial JSVMP features
+- `low` - Possible but uncertain patterns
+
+**Example Response:**
+
+```
+=== JSVMP Dispatcher Detection Result ===
+File: ./obfuscated.js (1-500)
+
+Summary: 检测到典型的 JSVMP 保护结构，包含主分发器和栈操作
+
+Detected Regions:
+[ultra_high] Lines 45-280: Switch Dispatcher
+  大型 switch 语句包含 47 个 case，典型的 JSVMP 指令分发器
+
+[high] Lines 12-44: Stack Operation
+  虚拟栈初始化和操作，使用数组索引进行 push/pop
 ```
 
-## API
+## What is JSVMP?
 
-### Types
+JSVMP (JavaScript Virtual Machine Protection) is a code protection technique that:
 
-```typescript
-// Detection types
-type DetectionType = 
-  | "If-Else Dispatcher" 
-  | "Switch Dispatcher" 
-  | "Instruction Array" 
-  | "Stack Operation";
+1. Converts JavaScript source code to custom bytecode
+2. Implements a virtual machine to execute the bytecode
+3. Uses dispatchers (switch/if-else) to handle different opcodes
+4. Maintains a virtual stack for operand storage
 
-type ConfidenceLevel = "ultra_high" | "high" | "medium" | "low";
-
-interface DetectionRegion {
-  start: number;
-  end: number;
-  type: DetectionType;
-  confidence: ConfidenceLevel;
-  description: string;
-}
-
-interface JsvmpDetectionResult {
-  success: boolean;
-  filePath: string;
-  startLine: number;
-  endLine: number;
-  result?: DetectionResult;
-  formattedOutput?: string;
-  error?: string;
-}
-```
-
-### Functions
-
-- `findJsvmpDispatcher(filePath, startLine, endLine, options?)` - Detect JSVMP patterns
-- `formatCodeForAnalysis(filePath, startLine, endLine, charLimit?)` - Format code for LLM
-- `parseDetectionResult(jsonString)` - Parse LLM response
-- `getLLMConfig()` - Get LLM configuration from environment
-- `isLLMConfigured()` - Check if LLM is configured
-- `createLLMClient(config)` - Create LLM client instance
+This makes reverse engineering significantly harder as the original logic is hidden behind VM interpretation.
 
 ## Related Packages
 
-- **[@reverse-craft/smart-fs](https://github.com/reverse-craft/smart-fs)** - Core library
-- **[@reverse-craft/smart-fs-mcp](https://github.com/reverse-craft/smart-fs-mcp)** - MCP server
+- **[@reverse-craft/smart-fs](https://github.com/reverse-craft/smart-fs)** - Core library for code processing
+- **[@reverse-craft/smart-fs-mcp](https://github.com/reverse-craft/smart-fs-mcp)** - MCP server for smart-fs
 
 ## License
 
