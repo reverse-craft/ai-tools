@@ -1,6 +1,6 @@
 {
   "name": "@reverse-craft/ai-tools",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "MCP server for AI-powered JSVMP detection - provides LLM-driven code analysis tools",
   "type": "module",
   "main": "dist/server.js",
