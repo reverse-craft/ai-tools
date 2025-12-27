@@ -8,7 +8,7 @@ import { findJsvmpDispatcher } from '../jsvmpDetector.js';
 export const FindJsvmpDispatcherInputSchema = {
   filePath: z.string().describe('Path to the JavaScript file to analyze'),
   charLimit: z.number().int().positive().optional().describe('Character limit for string truncation (default: 300)'),
-  maxTokensPerBatch: z.number().int().positive().optional().describe('Maximum tokens per batch for LLM analysis (default: 200000)'),
+  maxTokensPerBatch: z.number().int().positive().optional().describe('Maximum tokens per batch for LLM analysis (default: 150000)'),
 };
 
 /**
@@ -46,7 +46,7 @@ Requires OPENAI_API_KEY environment variable. Optional: OPENAI_BASE_URL, OPENAI_
 
     const result = await findJsvmpDispatcher(filePath, {
       charLimit: charLimit ?? 300,
-      maxTokensPerBatch: maxTokensPerBatch ?? 200000,
+      maxTokensPerBatch: maxTokensPerBatch ?? 150000,
     });
 
     if (!result.success) {

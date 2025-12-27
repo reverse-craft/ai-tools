@@ -18,9 +18,9 @@ export type LLMProvider = 'openai' | 'anthropic' | 'google';
  * Provider-specific default configurations
  */
 export const PROVIDER_DEFAULTS: Record<LLMProvider, { model: string }> = {
-  openai: { model: 'gpt-4o-mini' },
-  anthropic: { model: 'claude-sonnet-4-20250514' },
-  google: { model: 'gemini-2.0-flash' },
+  openai: { model: 'gpt-4.1-mini' },
+  anthropic: { model: 'claude-haiku-4-5-20241022' },
+  google: { model: 'gemini-2.5-flash-lite' },
 };
 
 /**

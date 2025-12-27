@@ -39,7 +39,7 @@ export LLM_BASE_URL=https://custom.api.com  # Override base URL for any provider
 ```bash
 export LLM_PROVIDER=openai
 export OPENAI_API_KEY=your-api-key
-export OPENAI_MODEL=gpt-4o-mini          # Optional, default: gpt-4o-mini
+export OPENAI_MODEL=gpt-4.1-mini          # Optional, default: gpt-4.1-mini
 export OPENAI_BASE_URL=https://api.openai.com/v1  # Optional, for custom endpoints
 ```
 
@@ -48,7 +48,7 @@ export OPENAI_BASE_URL=https://api.openai.com/v1  # Optional, for custom endpoin
 ```bash
 export LLM_PROVIDER=anthropic
 export ANTHROPIC_API_KEY=your-api-key
-export ANTHROPIC_MODEL=claude-sonnet-4-20250514  # Optional, default: claude-sonnet-4-20250514
+export ANTHROPIC_MODEL=claude-haiku-4-5-20241022  # Optional, default: claude-haiku-4-5-20241022
 export ANTHROPIC_BASE_URL=https://api.anthropic.com  # Optional, for custom endpoints
 ```
 
@@ -57,7 +57,7 @@ export ANTHROPIC_BASE_URL=https://api.anthropic.com  # Optional, for custom endp
 ```bash
 export LLM_PROVIDER=google
 export GOOGLE_API_KEY=your-api-key
-export GOOGLE_MODEL=gemini-2.0-flash     # Optional, default: gemini-2.0-flash
+export GOOGLE_MODEL=gemini-2.5-flash-lite     # Optional, default: gemini-2.5-flash-lite
 export GOOGLE_BASE_URL=https://generativelanguage.googleapis.com  # Optional, for custom endpoints
 ```
 
@@ -69,13 +69,13 @@ export GOOGLE_BASE_URL=https://generativelanguage.googleapis.com  # Optional, fo
 | `LLM_MODEL` | All | No | - | Universal model override (highest priority) |
 | `LLM_BASE_URL` | All | No | - | Universal base URL override (highest priority) |
 | `OPENAI_API_KEY` | OpenAI | Yes* | - | OpenAI API key |
-| `OPENAI_MODEL` | OpenAI | No | `gpt-4o-mini` | Model to use |
+| `OPENAI_MODEL` | OpenAI | No | `gpt-4.1-mini` | Model to use |
 | `OPENAI_BASE_URL` | OpenAI | No | SDK default | Custom API endpoint |
 | `ANTHROPIC_API_KEY` | Anthropic | Yes* | - | Anthropic API key |
-| `ANTHROPIC_MODEL` | Anthropic | No | `claude-sonnet-4-20250514` | Model to use |
+| `ANTHROPIC_MODEL` | Anthropic | No | `claude-haiku-4-5-20241022` | Model to use |
 | `ANTHROPIC_BASE_URL` | Anthropic | No | SDK default | Custom API endpoint |
 | `GOOGLE_API_KEY` | Google | Yes* | - | Google API key |
-| `GOOGLE_MODEL` | Google | No | `gemini-2.0-flash` | Model to use |
+| `GOOGLE_MODEL` | Google | No | `gemini-2.5-flash-lite` | Model to use |
 | `GOOGLE_BASE_URL` | Google | No | SDK default | Custom API endpoint |
 
 *Required only when using the corresponding provider
@@ -110,7 +110,7 @@ Add to your MCP client configuration (e.g., Claude Desktop, Kiro):
       "args": ["@reverse-craft/ai-tools"],
       "env": {
         "OPENAI_API_KEY": "your-api-key",
-        "OPENAI_MODEL": "gpt-4o-mini",
+        "OPENAI_MODEL": "gpt-4.1-mini",
         "OPENAI_BASE_URL": "https://api.openai.com/v1"
       }
     }
@@ -129,7 +129,7 @@ Add to your MCP client configuration (e.g., Claude Desktop, Kiro):
       "env": {
         "LLM_PROVIDER": "anthropic",
         "ANTHROPIC_API_KEY": "your-api-key",
-        "ANTHROPIC_MODEL": "claude-sonnet-4-20250514",
+        "ANTHROPIC_MODEL": "claude-haiku-4-5-20241022",
         "ANTHROPIC_BASE_URL": "https://api.anthropic.com"
       }
     }
@@ -148,7 +148,7 @@ Add to your MCP client configuration (e.g., Claude Desktop, Kiro):
       "env": {
         "LLM_PROVIDER": "google",
         "GOOGLE_API_KEY": "your-api-key",
-        "GOOGLE_MODEL": "gemini-2.0-flash",
+        "GOOGLE_MODEL": "gemini-2.5-flash-lite",
         "GOOGLE_BASE_URL": "https://generativelanguage.googleapis.com"
       }
     }
@@ -202,9 +202,8 @@ Detect JSVMP (JavaScript Virtual Machine Protection) patterns in code using LLM 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | filePath | string | Yes | Path to the JavaScript file to analyze |
-| startLine | number | Yes | Start line number (1-based) |
-| endLine | number | Yes | End line number (1-based) |
 | charLimit | number | No | Character limit for string truncation (default: 300) |
+| maxTokensPerBatch | number | No | Maximum tokens per batch for LLM analysis (default: 150000) |
 
 **Detection Types:**
 
