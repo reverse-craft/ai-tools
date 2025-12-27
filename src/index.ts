@@ -13,6 +13,9 @@
 export {
   type LLMConfig,
   type LLMClient,
+  type LLMProvider,
+  PROVIDER_DEFAULTS,
+  PROVIDER_ENV_KEYS,
   getLLMConfig,
   isLLMConfigured,
   createLLMClient,

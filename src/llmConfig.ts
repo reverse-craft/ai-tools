@@ -3,10 +3,72 @@
  * Handles reading and validating LLM configuration from environment variables
  */
 
-export interface LLMConfig {
-  apiKey: string;
+import { generateText } from 'ai';
+import { createOpenAI } from '@ai-sdk/openai';
+import { createAnthropic } from '@ai-sdk/anthropic';
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import type { LanguageModel } from 'ai';
+
+/**
+ * Supported LLM providers
+ */
+export type LLMProvider = 'openai' | 'anthropic' | 'google';
+
+/**
+ * Provider-specific default configurations
+ */
+export const PROVIDER_DEFAULTS: Record<LLMProvider, { model: string }> = {
+  openai: { model: 'gpt-4o-mini' },
+  anthropic: { model: 'claude-sonnet-4-20250514' },
+  google: { model: 'gemini-2.0-flash' },
+};
+
+/**
+ * Environment variable names for each provider
+ */
+export const PROVIDER_ENV_KEYS: Record<LLMProvider, { 
+  apiKey: string; 
+  model: string; 
   baseUrl: string;
+}> = {
+  openai: { 
+    apiKey: 'OPENAI_API_KEY', 
+    model: 'OPENAI_MODEL', 
+    baseUrl: 'OPENAI_BASE_URL' 
+  },
+  anthropic: { 
+    apiKey: 'ANTHROPIC_API_KEY', 
+    model: 'ANTHROPIC_MODEL',
+    baseUrl: 'ANTHROPIC_BASE_URL'
+  },
+  google: { 
+    apiKey: 'GOOGLE_API_KEY', 
+    model: 'GOOGLE_MODEL',
+    baseUrl: 'GOOGLE_BASE_URL'
+  },
+};
+
+/**
+ * Extended LLM configuration with provider information
+ */
+export interface LLMConfig {
+  provider: LLMProvider;
+  apiKey: string;
   model: string;
+  baseUrl?: string;  // Custom base URL for all providers
+}
+
+/**
+ * Validates provider string against valid values
+ * @param value - The provider string to validate
+ * @returns The validated LLMProvider or null if invalid
+ */
+export function validateProvider(value: string | undefined): LLMProvider | null {
+  if (value === undefined) return null;
+  if (value === 'openai' || value === 'anthropic' || value === 'google') {
+    return value;
+  }
+  return null;
 }
 
 /**
@@ -14,21 +76,40 @@ export interface LLMConfig {
  * @returns LLMConfig | null (null 表示未配置)
  */
 export function getLLMConfig(): LLMConfig | null {
-  const apiKey = process.env.OPENAI_API_KEY;
+  // 1. Determine provider (default to 'openai')
+  const providerEnv = process.env.LLM_PROVIDER?.toLowerCase();
+  const provider = validateProvider(providerEnv);
   
-  // API Key is required
+  if (provider === null && providerEnv !== undefined) {
+    // Invalid provider specified
+    console.warn(`Invalid LLM_PROVIDER: ${providerEnv}. Valid values: openai, anthropic, google`);
+    return null;
+  }
+  
+  const effectiveProvider = provider ?? 'openai';
+  
+  // 2. Get provider-specific environment variable names
+  const envKeys = PROVIDER_ENV_KEYS[effectiveProvider];
+  
+  // 3. Read API key (required)
+  const apiKey = process.env[envKeys.apiKey];
   if (!apiKey) {
     return null;
   }
   
-  // Use defaults for optional configuration
-  const baseUrl = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
-  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+  // 4. Read model: LLM_MODEL > provider-specific > default
+  const model = process.env.LLM_MODEL 
+    || process.env[envKeys.model] 
+    || PROVIDER_DEFAULTS[effectiveProvider].model;
+  
+  // 5. Read base URL: LLM_BASE_URL > provider-specific > undefined
+  const baseUrl = process.env.LLM_BASE_URL || process.env[envKeys.baseUrl];
   
   return {
+    provider: effectiveProvider,
     apiKey,
+    model,
     baseUrl,
-    model
   };
 }
 
@@ -111,62 +192,61 @@ Return **ONLY valid JSON**. No markdown wrapper, no conversational text.
 }
 
 /**
+ * Creates a provider-specific model instance using the AI SDK
+ * @param config - The LLM configuration
+ * @returns A LanguageModel instance for the configured provider
+ */
+export function createProviderModel(config: LLMConfig): LanguageModel {
+  switch (config.provider) {
+    case 'openai': {
+      const openai = createOpenAI({
+        apiKey: config.apiKey,
+        baseURL: config.baseUrl,
+      });
+      return openai(config.model);
+    }
+    case 'anthropic': {
+      const anthropic = createAnthropic({
+        apiKey: config.apiKey,
+        baseURL: config.baseUrl,
+      });
+      return anthropic(config.model);
+    }
+    case 'google': {
+      const google = createGoogleGenerativeAI({
+        apiKey: config.apiKey,
+        baseURL: config.baseUrl,
+      });
+      return google(config.model);
+    }
+  }
+}
+
+/**
  * 创建 LLM 客户端实例
  */
 export function createLLMClient(config: LLMConfig): LLMClient {
+  const model = createProviderModel(config);
+  
   return {
     async analyzeJSVMP(formattedCode: string): Promise<string> {
       const systemPrompt = buildJSVMPSystemPrompt();
       
-      const requestBody = {
-        model: config.model,
-        messages: [
-          {
-            role: "system",
-            content: systemPrompt
-          },
-          {
-            role: "user",
-            content: `请分析以下代码，识别 JSVMP 保护结构：\n\n${formattedCode}`
-          }
-        ],
-        temperature: 0.1,
-        response_format: { type: "json_object" }
-      };
-      
       try {
-        const response = await fetch(`${config.baseUrl}/chat/completions`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${config.apiKey}`
-          },
-          body: JSON.stringify(requestBody)
+        const result = await generateText({
+          model,
+          system: systemPrompt,
+          prompt: `请分析以下代码，识别 JSVMP 保护结构：\n\n${formattedCode}`,
+          temperature: 0.1,
         });
         
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`API 请求失败 (${response.status}): ${errorText}`);
-        }
-        
-        const data = await response.json();
-        
-        if (!data.choices || !data.choices[0] || !data.choices[0].message) {
-          throw new Error("API 响应格式无效：缺少 choices 或 message 字段");
-        }
-        
-        const content = data.choices[0].message.content;
-        
-        if (typeof content !== "string") {
-          throw new Error("API 响应格式无效：message.content 不是字符串");
-        }
-        
-        return content;
+        return result.text;
       } catch (error) {
+        const providerName = config.provider.charAt(0).toUpperCase() + config.provider.slice(1);
         if (error instanceof Error) {
-          throw new Error(`LLM 请求失败: ${error.message}`);
+          throw new Error(`${providerName} LLM 请求失败: ${error.message}`);
         }
-        throw new Error(`LLM 请求失败: ${String(error)}`);
+        throw new Error(`${providerName} LLM 请求失败: ${String(error)}`);
       }
     }
   };
