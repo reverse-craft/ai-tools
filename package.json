@@ -45,6 +45,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.1",
     "source-map-js": "^1.2.1",
+    "tiktoken": "^1.0.22",
     "zod": "^4.2.1"
   },
   "peerDependencies": {

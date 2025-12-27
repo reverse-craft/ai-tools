@@ -7,9 +7,8 @@ import { findJsvmpDispatcher } from '../jsvmpDetector.js';
  */
 export const FindJsvmpDispatcherInputSchema = {
   filePath: z.string().describe('Path to the JavaScript file to analyze'),
-  startLine: z.number().int().positive().describe('Start line number (1-based)'),
-  endLine: z.number().int().positive().describe('End line number (1-based)'),
   charLimit: z.number().int().positive().optional().describe('Character limit for string truncation (default: 300)'),
+  maxTokensPerBatch: z.number().int().positive().optional().describe('Maximum tokens per batch for LLM analysis (default: 200000)'),
 };
 
 /**
@@ -36,20 +35,18 @@ JSVMP is a code protection technique that converts JavaScript to bytecode execut
 - Instruction Arrays: Arrays storing bytecode instructions
 - Stack Operations: Virtual stack push/pop patterns
 
+Automatically splits large files into batches based on token limits and merges results.
+
 Returns detection results with confidence levels (ultra_high, high, medium, low) and detailed descriptions.
 
 Requires OPENAI_API_KEY environment variable. Optional: OPENAI_BASE_URL, OPENAI_MODEL.`,
   schema: FindJsvmpDispatcherInputSchema,
   handler: async (params): Promise<string> => {
-    const { filePath, startLine, endLine, charLimit } = params;
+    const { filePath, charLimit, maxTokensPerBatch } = params;
 
-    // Validate endLine >= startLine
-    if (endLine < startLine) {
-      throw new Error('endLine must be >= startLine');
-    }
-
-    const result = await findJsvmpDispatcher(filePath, startLine, endLine, {
+    const result = await findJsvmpDispatcher(filePath, {
       charLimit: charLimit ?? 300,
+      maxTokensPerBatch: maxTokensPerBatch ?? 200000,
     });
 
     if (!result.success) {

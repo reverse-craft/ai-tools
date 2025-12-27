@@ -6,7 +6,8 @@
 import { SourceMapConsumer } from 'source-map-js';
 import { ensureBeautified, truncateCodeHighPerf } from '@reverse-craft/smart-fs';
 import { existsSync } from 'fs';
-import { getLLMConfig, createLLMClient } from './llmConfig.js';
+import { getLLMConfig, createLLMClient, LLMClient } from './llmConfig.js';
+import { countTokens, splitByTokenLimit } from './tokenizer.js';
 
 /**
  * Formatted code result interface
@@ -55,7 +56,8 @@ export interface DetectionResult {
  * Options for JSVMP detection
  */
 export interface JsvmpDetectionOptions {
-  charLimit?: number;
+  charLimit?: number;           // Default: 300
+  maxTokensPerBatch?: number;   // Default: 8000
 }
 
 /**
@@ -64,11 +66,30 @@ export interface JsvmpDetectionOptions {
 export interface JsvmpDetectionResult {
   success: boolean;
   filePath: string;
-  startLine: number;
-  endLine: number;
+  totalLines: number;
+  batchCount: number;
   result?: DetectionResult;
   formattedOutput?: string;
   error?: string;
+  partialErrors?: string[];     // Errors from failed batches
+}
+
+/**
+ * Batch information for processing
+ */
+export interface BatchInfo {
+  startLine: number;    // 批次起始行号 (1-based)
+  endLine: number;      // 批次结束行号 (1-based)
+  content: string;      // 格式化后的代码内容
+  tokenCount: number;   // 该批次的 token 数量
+}
+
+/**
+ * Result from formatEntireFile function
+ */
+export interface FormattedFileResult {
+  lines: string[];      // 格式化后的代码行数组
+  totalLines: number;   // 总行数
 }
 
 /**
@@ -167,6 +188,131 @@ export async function formatCodeForAnalysis(
     startLine: effectiveStartLine,
     endLine: effectiveEndLine,
   };
+}
+
+/**
+ * 格式化整个文件为 LLM 分析格式
+ * 格式: "LineNo SourceLoc Code"
+ * 
+ * 处理流程：
+ * 1. 调用 ensureBeautified 美化代码
+ * 2. 调用 truncateCodeHighPerf 截断长字符串
+ * 3. 使用 SourceMapConsumer 获取原始坐标
+ * 4. 返回格式化后的行数组（保留原始行号）
+ * 
+ * @param filePath - Path to the JavaScript file
+ * @param charLimit - Character limit for string truncation (default 300)
+ * @returns FormattedFileResult with formatted lines array and metadata
+ */
+export async function formatEntireFile(
+  filePath: string,
+  charLimit: number = 300
+): Promise<FormattedFileResult> {
+  // Step 1: Beautify the file and get source map
+  const beautifyResult = await ensureBeautified(filePath);
+  const { code, rawMap } = beautifyResult;
+
+  // Step 2: Truncate long strings
+  const truncatedCode = truncateCodeHighPerf(code, charLimit);
+
+  // Split into lines
+  const codeLines = truncatedCode.split('\n');
+  const totalLines = codeLines.length;
+
+  // Step 3: Format each line with "LineNo SourceLoc Code" format
+  const formattedLines: string[] = [];
+
+  // Create source map consumer if available
+  let consumer: SourceMapConsumer | null = null;
+  if (rawMap && rawMap.sources && rawMap.names && rawMap.mappings) {
+    consumer = new SourceMapConsumer({
+      version: String(rawMap.version),
+      sources: rawMap.sources,
+      names: rawMap.names,
+      mappings: rawMap.mappings,
+      file: rawMap.file,
+      sourceRoot: rawMap.sourceRoot,
+    });
+  }
+
+  for (let lineNum = 1; lineNum <= totalLines; lineNum++) {
+    const lineIndex = lineNum - 1;
+    const lineContent = codeLines[lineIndex] ?? '';
+
+    // Get original position from source map if available
+    let sourcePos = '';
+    if (consumer) {
+      const originalPos = consumer.originalPositionFor({
+        line: lineNum,
+        column: 0,
+      });
+      sourcePos = formatSourcePosition(originalPos.line, originalPos.column);
+    }
+    
+    formattedLines.push(formatCodeLine(lineNum, sourcePos, lineContent));
+  }
+
+  return {
+    lines: formattedLines,
+    totalLines,
+  };
+}
+
+/**
+ * Extract line number from a formatted code line
+ * Format: "LineNo SourceLoc Code"
+ * 
+ * @param formattedLine - A formatted code line
+ * @returns The line number (1-based)
+ */
+function extractLineNumber(formattedLine: string): number {
+  const lineNumStr = formattedLine.substring(0, 5).trim();
+  return parseInt(lineNumStr, 10);
+}
+
+/**
+ * 创建批次用于分批处理
+ * 使用 tokenizer 分割代码，记录每个批次的 startLine/endLine
+ * 
+ * @param formattedLines - 格式化后的代码行数组
+ * @param maxTokensPerBatch - 每批次最大 token 数量
+ * @returns BatchInfo 数组
+ */
+export function createBatches(
+  formattedLines: string[],
+  maxTokensPerBatch: number
+): BatchInfo[] {
+  if (formattedLines.length === 0) {
+    return [];
+  }
+
+  // Split lines into batches based on token limit
+  const lineBatches = splitByTokenLimit(formattedLines, maxTokensPerBatch);
+  
+  const batches: BatchInfo[] = [];
+  
+  for (const batchLines of lineBatches) {
+    if (batchLines.length === 0) continue;
+    
+    // Extract start and end line numbers from formatted lines
+    const startLine = extractLineNumber(batchLines[0]);
+    const endLine = extractLineNumber(batchLines[batchLines.length - 1]);
+    
+    // Join lines to create batch content
+    const content = batchLines.join('\n');
+    
+    // Calculate token count for this batch
+    const tokenCount = countTokens(content);
+    
+    batches.push({
+      startLine,
+      endLine,
+      content,
+      tokenCount,
+    });
+  }
+  
+  return batches;
 }
 
 /**
@@ -308,13 +454,13 @@ export function parseDetectionResult(jsonString: string): DetectionResult {
 function formatDetectionResultOutput(
   result: DetectionResult,
   filePath: string,
-  startLine: number,
-  endLine: number
+  totalLines: number,
+  batchCount: number
 ): string {
   const lines: string[] = [];
   
   lines.push('=== JSVMP Dispatcher Detection Result ===');
-  lines.push(`File: ${filePath} (${startLine}-${endLine})`);
+  lines.push(`File: ${filePath} (${totalLines} lines, ${batchCount} batch${batchCount > 1 ? 'es' : ''})`);
   lines.push('');
   lines.push(`Summary: ${result.summary}`);
   lines.push('');
@@ -334,21 +480,139 @@ function formatDetectionResultOutput(
 }
 
 /**
+ * Merge detection results from multiple batches
+ * - Combines all regions from all batches
+ * - Combines summaries from all batches
+ * - Sorts regions by start line
+ * - Deduplicates overlapping regions (keeps higher confidence)
+ * 
+ * @param results - Array of DetectionResult from each batch
+ * @returns Merged DetectionResult
+ */
+export function mergeDetectionResults(results: DetectionResult[]): DetectionResult {
+  if (results.length === 0) {
+    return { summary: '', regions: [] };
+  }
+  
+  if (results.length === 1) {
+    // Still need to sort and deduplicate regions for single result
+    const sortedRegions = [...results[0].regions].sort((a, b) => a.start - b.start);
+    return { summary: results[0].summary, regions: sortedRegions };
+  }
+  
+  // Combine summaries
+  const summaries = results.map((r, i) => `[Batch ${i + 1}] ${r.summary}`);
+  const combinedSummary = summaries.join('\n');
+  
+  // Collect all regions
+  const allRegions: DetectionRegion[] = [];
+  for (const result of results) {
+    allRegions.push(...result.regions);
+  }
+  
+  // Sort by start line
+  allRegions.sort((a, b) => a.start - b.start);
+  
+  // Deduplicate overlapping regions (keep higher confidence)
+  const confidenceOrder: Record<ConfidenceLevel, number> = {
+    'ultra_high': 4,
+    'high': 3,
+    'medium': 2,
+    'low': 1,
+  };
+  
+  const deduplicatedRegions: DetectionRegion[] = [];
+  for (const region of allRegions) {
+    // Check if this region overlaps with any existing region
+    let overlappingIndex = -1;
+    for (let i = 0; i < deduplicatedRegions.length; i++) {
+      const existing = deduplicatedRegions[i];
+      // Check for overlap: regions overlap if one starts before the other ends
+      if (region.start <= existing.end && region.end >= existing.start) {
+        overlappingIndex = i;
+        break;
+      }
+    }
+    
+    if (overlappingIndex === -1) {
+      // No overlap, add the region
+      deduplicatedRegions.push(region);
+    } else {
+      // Overlap found, keep the one with higher confidence
+      const existing = deduplicatedRegions[overlappingIndex];
+      if (confidenceOrder[region.confidence] > confidenceOrder[existing.confidence]) {
+        deduplicatedRegions[overlappingIndex] = region;
+      }
+      // If equal confidence, keep the first one (existing)
+    }
+  }
+  
+  return {
+    summary: combinedSummary,
+    regions: deduplicatedRegions,
+  };
+}
+
+/**
+ * Process a single batch through LLM
+ * 
+ * @param client - LLM client
+ * @param batch - Batch information
+ * @returns DetectionResult from LLM analysis
+ */
+async function processBatch(
+  client: LLMClient,
+  batch: BatchInfo
+): Promise<DetectionResult> {
+  const llmResponse = await client.analyzeJSVMP(batch.content);
+  return parseDetectionResult(llmResponse);
+}
+
+/**
+ * Process batches with error handling
+ * - Continues processing if some batches fail
+ * - Collects partial results and error information
+ * 
+ * @param client - LLM client
+ * @param batches - Array of BatchInfo
+ * @returns Object with successful results and error messages
+ */
+export async function processBatchesWithErrorHandling(
+  client: LLMClient,
+  batches: BatchInfo[]
+): Promise<{ results: DetectionResult[]; errors: string[] }> {
+  const results: DetectionResult[] = [];
+  const errors: string[] = [];
+  
+  for (let i = 0; i < batches.length; i++) {
+    const batch = batches[i];
+    try {
+      const result = await processBatch(client, batch);
+      results.push(result);
+    } catch (error) {
+      const errorMsg = `Batch ${i + 1} (lines ${batch.startLine}-${batch.endLine}) failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+      errors.push(errorMsg);
+    }
+  }
+  
+  return { results, errors };
+}
+
+/**
  * Find JSVMP dispatcher patterns in JavaScript code using LLM analysis
  * 
  * @param filePath - Path to the JavaScript file to analyze
- * @param startLine - Start line number (1-based)
- * @param endLine - End line number (1-based)
  * @param options - Optional configuration
  * @returns JsvmpDetectionResult with detection results or error
  */
 export async function findJsvmpDispatcher(
   filePath: string,
-  startLine: number,
-  endLine: number,
   options?: JsvmpDetectionOptions
 ): Promise<JsvmpDetectionResult> {
   const charLimit = options?.charLimit ?? 300;
+  const maxTokensPerBatch = options?.maxTokensPerBatch ?? 8000;
   
   // Check LLM configuration
   const config = getLLMConfig();
@@ -356,8 +620,8 @@ export async function findJsvmpDispatcher(
     return {
       success: false,
       filePath,
-      startLine,
-      endLine,
+      totalLines: 0,
+      batchCount: 0,
       error: '未配置 LLM。请设置环境变量 OPENAI_API_KEY 以启用 JSVMP dispatcher 检测功能。'
     };
   }
@@ -367,46 +631,61 @@ export async function findJsvmpDispatcher(
     return {
       success: false,
       filePath,
-      startLine,
-      endLine,
+      totalLines: 0,
+      batchCount: 0,
       error: `文件不存在: ${filePath}`
     };
   }
   
   try {
-    // Format code for analysis
-    const formattedCode = await formatCodeForAnalysis(
-      filePath,
-      startLine,
-      endLine,
-      charLimit
-    );
+    // Format entire file for analysis
+    const formattedCode = await formatEntireFile(filePath, charLimit);
+    const totalLines = formattedCode.totalLines;
     
-    // Create LLM client and analyze
+    // Create batches based on token limit
+    const batches = createBatches(formattedCode.lines, maxTokensPerBatch);
+    const batchCount = batches.length;
+    
+    // Create LLM client
     const client = createLLMClient(config);
-    const llmResponse = await client.analyzeJSVMP(formattedCode.content);
     
-    // Parse detection result
-    const result = parseDetectionResult(llmResponse);
+    // Process batches with error handling
+    const { results, errors } = await processBatchesWithErrorHandling(client, batches);
+    
+    // If all batches failed, return error
+    if (results.length === 0) {
+      return {
+        success: false,
+        filePath,
+        totalLines,
+        batchCount,
+        error: `所有批次处理失败: ${errors.join('; ')}`,
+        partialErrors: errors
+      };
+    }
+    
+    // Merge results from all successful batches
+    const mergedResult = mergeDetectionResults(results);
     
     // Format output
-    const formattedOutput = formatDetectionResultOutput(result, filePath, startLine, endLine);
+    const formattedOutput = formatDetectionResultOutput(mergedResult, filePath, totalLines, batchCount);
     
     return {
       success: true,
       filePath,
-      startLine: formattedCode.startLine,
-      endLine: formattedCode.endLine,
-      result,
-      formattedOutput
+      totalLines,
+      batchCount,
+      result: mergedResult,
+      formattedOutput,
+      partialErrors: errors.length > 0 ? errors : undefined
     };
     
   } catch (error) {
     return {
       success: false,
       filePath,
-      startLine,
-      endLine,
+      totalLines: 0,
+      batchCount: 0,
       error: error instanceof Error ? error.message : String(error)
     };
   }
