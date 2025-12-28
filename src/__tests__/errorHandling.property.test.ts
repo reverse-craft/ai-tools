@@ -25,8 +25,7 @@ import type { LLMClient } from '../llmConfig.js';
 const DETECTION_TYPES: DetectionType[] = [
   "If-Else Dispatcher",
   "Switch Dispatcher",
-  "Instruction Array",
-  "Stack Operation"
+  "Instruction Array"
 ];
 
 /**
@@ -40,14 +39,17 @@ const CONFIDENCE_LEVELS: ConfidenceLevel[] = [
 ];
 
 /**
- * Generate a valid DetectionResult JSON string
+ * Generate a valid DetectionResult JSON string (using new format with start_line/end_line)
  */
 function generateValidResultJson(batchIndex: number): string {
-  const result: DetectionResult = {
-    summary: `Analysis of batch ${batchIndex}`,
+  const result = {
+    summary: {
+      overall_description: `Analysis of batch ${batchIndex}`,
+      debugging_recommendation: `Debug batch ${batchIndex} at the entry point`
+    },
     regions: [{
-      start: batchIndex * 100 + 1,
-      end: batchIndex * 100 + 50,
+      start_line: batchIndex * 100 + 1,
+      end_line: batchIndex * 100 + 50,
       type: DETECTION_TYPES[batchIndex % DETECTION_TYPES.length],
       confidence: CONFIDENCE_LEVELS[batchIndex % CONFIDENCE_LEVELS.length],
       description: `Region found in batch ${batchIndex}`,

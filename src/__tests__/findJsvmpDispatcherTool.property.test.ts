@@ -7,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fc from 'fast-check';
 import { z } from 'zod';
-import { FindJsvmpDispatcherInputSchema, findJsvmpDispatcherTool } from './findJsvmpDispatcherTool.js';
+import { FindJsvmpDispatcherInputSchema, findJsvmpDispatcherTool } from '../tools/findJsvmpDispatcherTool.js';
 
 // Create Zod schema object for validation
 const inputSchema = z.object(FindJsvmpDispatcherInputSchema);

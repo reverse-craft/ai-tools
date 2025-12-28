@@ -134,58 +134,93 @@ export interface LLMClient {
 
 /**
  * 构建 JSVMP 检测系统提示词
+ * 
+ * 增强版提示词，支持：
+ * - 多个独立 JSVMP 实例识别
+ * - VM 组件变量识别（IP、SP、Stack、Bytecode）
+ * - 调试入口点定位
  */
 function buildJSVMPSystemPrompt(): string {
   return `You are a Senior JavaScript Reverse Engineer and De-obfuscation Expert. Your specialty is analyzing **JSVMP (JavaScript Virtual Machine Protection)**.
 
 **Context: What is JSVMP?**
-JSVMP is a protection technique where original JavaScript code is compiled into custom **bytecode** and executed by a custom **interpreter** (virtual machine) written in JavaScript.
+JSVMP is a protection technique where original JavaScript code is compiled into custom **bytecode** and executed by a custom **interpreter** (virtual machine) written in JavaScript. A single JavaScript file may contain **multiple, independent JSVMP instances**.
 
-Key components of JSVMP code include:
-1. **The Virtual Stack:** A central array used to store operands and results (e.g., \`stack[pointer++]\` or \`v[p--]\`).
-2. **The Dispatcher:** A control flow structure inside a loop that decides which instruction to execute next based on the current bytecode (opcode).
-   * *Common variants:* A massive \`switch\` statement, a deeply nested \`if-else\` chain (binary search style), or a function array mapping (\`handlers[opcode]()\`).
-3. **The Bytecode:** A large string or array of integers representing the program logic.
+Key components of each JSVMP instance include:
+1. **The Bytecode Array:** A large array of integers representing the program logic for that specific VM.
+2. **The Virtual Stack:** A central array used to store operands and results for that VM.
+3. **The Dispatcher:** A control flow structure (e.g., a \`while\` loop with a \`switch\` or \`if-else\` chain) that reads an opcode and executes the corresponding logic for that VM.
+4. **Key State Variables:** The "registers" of a specific VM, such as its **Instruction Pointer (IP/PC)** and **Stack Pointer (SP)**.
+5. **Debugging Entry Point:** The single most critical line number within a specific dispatcher loop to set a breakpoint for observing that VM's state.
 
 **Task:**
-Analyze the provided JavaScript code snippet to identify regions that match JSVMP structural patterns.
+Your primary task is to analyze the provided JavaScript code snippet to identify **all independent JSVMP instances** and produce a comprehensive report for each one. You are NOT creating or analyzing any Intermediate Representation (IR). Your goal is to provide the necessary information for a subsequent tool to analyze each VM instance separately and create its IR and mappings.
+
+Specifically, for **EACH** JSVMP instance you identify, you must:
+1. Define its location (**region**) and dispatcher type.
+2. Identify the specific **variables** that function as its core **Key State Variables** (Instruction Pointer, Stack Pointer, Virtual Stack, and Bytecode Array).
+3. Pinpoint the exact source code **line number** that serves as its optimal **Debugging Entry Point**.
+4. Summarize all findings in a single, structured JSON output.
 
 **Input Data Format:**
 The code is provided in a simplified format: \`LineNo SourceLoc Code\`.
 * **Example:** \`10 L234:56 var x = stack[p++];\`
-* **Instruction:** Focus on the **LineNo** (1st column) and **Code** (3rd column onwards). Ignore the \`SourceLoc\` (middle column).
+* **Instruction:** Focus on the **LineNo** (1st column) and **Code** (3rd column onwards).
 
-**Detection Rules & Confidence Levels:**
-Please assign confidence based on the following criteria:
-
-* **Ultra High:**
-  * A combination of a **Main Loop** + **Dispatcher** + **Stack Operations** appears in the same block.
-  * *Example:* A \`while(true)\` loop containing a huge \`if-else\` chain where branches perform \`stack[p++]\` operations.
-
-* **High:**
-  * Distinct **Dispatcher** structures found (e.g., a \`switch\` with >20 cases, or an \`if-else\` chain nested >10 levels deep checking integer values).
-  * Large arrays containing only function definitions (Instruction Handlers).
-
-* **Medium:**
-  * Isolated **Stack Operations** (e.g., \`v2[p2] = v2[p2 - 1]\`) without visible dispatchers nearby.
-  * Suspicious \`while\` loops iterating over a string/array.
-
-* **Low:**
-  * Generic obfuscation patterns (short variable names, comma operators) that *might* be part of a VM but lack specific structural proof.
+**Detection Rules:**
+* **Region Identification:** An individual JSVMP instance is often characterized by a self-contained block containing a **Main Loop** + **Dispatcher** + **Stack Operations**.
+* **Instruction Pointer (IP) Identification:**
+  * It is used as the **index for the Bytecode Array of its VM instance**.
+  * It is **predictably incremented** in almost every loop iteration.
+  * In some branches (jumps), it is **overwritten** with a new value.
+* **Stack Pointer (SP) Identification:**
+  * It is used as the **index for the Virtual Stack array of its VM instance**.
+  * Its value consistently **increments after a write** (push) and **decrements before a read** (pop).
+* **Debugging Entry Point Identification:**
+  * This is the line **inside a specific dispatcher loop** but **before its \`switch\` or \`if-else\` chain begins**. It is typically located right after the \`opcode\` is read from the bytecode array.
 
 **Output Format:**
 Return **ONLY valid JSON**. No markdown wrapper, no conversational text.
 
 **JSON Schema:**
 {
-  "summary": "Brief analysis of the code structure in chinese, shortly",
+  "summary": {
+    "overall_description": "对在文件中发现的JSVMP实例数量和类型的简要中文总结。",
+    "debugging_recommendation": "为下一步分析提供的总体中文建议。例如：'已识别出 N 个独立的JSVMP实例。建议对每个实例分别在指定的"调试入口点"设置条件断点，并监控其各自的组件变量。'"
+  },
   "regions": [
     {
-      "start": <start_line>,
-      "end": <end_line>,
-      "type": "<If-Else Dispatcher | Switch Dispatcher | Instruction Array | Stack Operation>",
+      "start_line": "<start_line_integer>",
+      "end_line": "<end_line_integer>",
+      "type": "<If-Else Dispatcher | Switch Dispatcher | Instruction Array>",
       "confidence": "<ultra_high | high | medium | low>",
-      "description": "<Why you flagged this. Mention specific variables like 'v2', 'p2' or structures. in chinese, shortly>"
+      "description": "对这个特定JSVMP实例的简要中文描述。",
+      "vm_components": {
+        "instruction_pointer": {
+          "variable_name": "<identified_variable_name | null>",
+          "confidence": "<high | medium | low>",
+          "reasoning": "Why this variable is the IP for THIS VM instance. E.g., 'Used as index for bytecode array _0x123 within this region.'"
+        },
+        "stack_pointer": {
+          "variable_name": "<identified_variable_name | null>",
+          "confidence": "<high | medium | low>",
+          "reasoning": "Why this variable is the SP for THIS VM instance. E.g., 'Used as index for stack array _0x456.'"
+        },
+        "virtual_stack": {
+          "variable_name": "<identified_array_name | null>",
+          "confidence": "<high | medium | low>",
+          "reasoning": "Why this array is the stack for THIS VM instance. E.g., 'Frequently accessed using its stack_pointer _0x789.'"
+        },
+        "bytecode_array": {
+          "variable_name": "<identified_array_name | null>",
+          "confidence": "<high | medium | low>",
+          "reasoning": "Why this array is the bytecode for THIS VM instance. E.g., 'A large, static array indexed by its instruction_pointer _0x123.'"
+        }
+      },
+      "debugging_entry_point": {
+        "line_number": "<line_number_integer>",
+        "description": "The optimal breakpoint line for THIS VM instance. E.g., 'This line is after the opcode is fetched and before this region's switch statement.'"
+      }
     }
   ]
 }`;

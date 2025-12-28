@@ -16,7 +16,8 @@ import {
   type DetectionResult, 
   type DetectionRegion,
   type DetectionType,
-  type ConfidenceLevel 
+  type ConfidenceLevel,
+  type DetectionSummary
 } from '../jsvmpDetector.js';
 
 /**
@@ -25,8 +26,7 @@ import {
 const DETECTION_TYPES: DetectionType[] = [
   "If-Else Dispatcher",
   "Switch Dispatcher",
-  "Instruction Array",
-  "Stack Operation"
+  "Instruction Array"
 ];
 
 /**
@@ -64,12 +64,22 @@ const detectionRegionArb = fc.record({
 }));
 
 /**
- * Arbitrary for generating a DetectionResult
+ * Arbitrary for generating a DetectionResult with string summary
  */
 const detectionResultArb = fc.record({
   summary: fc.string({ minLength: 1, maxLength: 100 }),
   regions: fc.array(detectionRegionArb, { minLength: 0, maxLength: 5 }),
 });
+
+/**
+ * Helper to extract summary text from string or object format
+ */
+function getSummaryText(summary: string | DetectionSummary): string {
+  if (typeof summary === 'string') {
+    return summary;
+  }
+  return summary.overall_description;
+}
 
 /**
  * Check if two regions overlap
@@ -126,11 +136,15 @@ describe('Property 5: Merge preserves all detection regions', () => {
         fc.array(detectionResultArb, { minLength: 2, maxLength: 5 }),
         (results) => {
           const merged = mergeDetectionResults(results);
+          const summaryText = getSummaryText(merged.summary);
 
           // Each batch summary should appear in the combined summary
           for (let i = 0; i < results.length; i++) {
-            expect(merged.summary).toContain(results[i].summary);
-            expect(merged.summary).toContain(`[Batch ${i + 1}]`);
+            const inputSummary = typeof results[i].summary === 'string' 
+              ? results[i].summary 
+              : (results[i].summary as DetectionSummary).overall_description;
+            expect(summaryText).toContain(inputSummary);
+            expect(summaryText).toContain(`[Batch ${i + 1}]`);
           }
         }
       ),
@@ -202,7 +216,7 @@ describe('Property 6: Merged regions are sorted by start line', () => {
       {
         summary: 'Batch 1',
         regions: [
-          { start: 100, end: 110, type: 'Stack Operation', confidence: 'high', description: 'Region 1' },
+          { start: 100, end: 110, type: 'Instruction Array', confidence: 'high', description: 'Region 1' },
         ],
       },
       {
@@ -244,7 +258,7 @@ describe('Property 7: Overlapping regions deduplicated by confidence', () => {
       {
         summary: 'Batch 1',
         regions: [
-          { start: 10, end: 30, type: 'Stack Operation', confidence: 'low', description: 'Low confidence' },
+          { start: 10, end: 30, type: 'Instruction Array', confidence: 'low', description: 'Low confidence' },
         ],
       },
       {
@@ -269,7 +283,7 @@ describe('Property 7: Overlapping regions deduplicated by confidence', () => {
       {
         summary: 'Batch 1',
         regions: [
-          { start: 10, end: 30, type: 'Stack Operation', confidence: 'medium', description: 'First region' },
+          { start: 10, end: 30, type: 'Instruction Array', confidence: 'medium', description: 'First region' },
         ],
       },
       {
@@ -325,7 +339,7 @@ describe('Property 7: Overlapping regions deduplicated by confidence', () => {
       {
         summary: 'Batch 1',
         regions: [
-          { start: 10, end: 20, type: 'Stack Operation', confidence: 'low', description: 'Region 1' },
+          { start: 10, end: 20, type: 'Instruction Array', confidence: 'low', description: 'Region 1' },
         ],
       },
       {
@@ -348,7 +362,7 @@ describe('Property 7: Overlapping regions deduplicated by confidence', () => {
       {
         summary: 'Batch 1',
         regions: [
-          { start: 10, end: 20, type: 'Stack Operation', confidence: 'low', description: 'Region 1' },
+          { start: 10, end: 20, type: 'Instruction Array', confidence: 'low', description: 'Region 1' },
         ],
       },
       {
@@ -370,7 +384,7 @@ describe('Property 7: Overlapping regions deduplicated by confidence', () => {
       {
         summary: 'Batch 1',
         regions: [
-          { start: 10, end: 20, type: 'Stack Operation', confidence: 'medium', description: 'First' },
+          { start: 10, end: 20, type: 'Instruction Array', confidence: 'medium', description: 'First' },
         ],
       },
       {
