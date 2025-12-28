@@ -186,6 +186,12 @@ The code is provided in a simplified format: \`LineNo SourceLoc Code\`.
 * **Example:** \`10 L234:56 var x = stack[p++];\`
 * **Instruction:** Focus on the **LineNo** (1st column) and **Code** (3rd column onwards).
 
+**⚠️ CRITICAL: Line Number Accuracy Requirements ⚠️**
+* **ONLY use line numbers that ACTUALLY EXIST in the provided input.** Every \`start_line\`, \`end_line\`, and \`debugging_entry_point.line_number\` MUST correspond to a real \`LineNo\` from the first column of the input.
+* **DO NOT fabricate, estimate, or guess line numbers.** If you cannot find a specific line, report \`null\` instead of making up a number.
+* **VERIFY before outputting:** Before finalizing your JSON, double-check that each line number you report appears in the input data.
+* **Line numbers are integers from the first column only.** Do not confuse them with \`SourceLoc\` (e.g., \`L234:56\`) which is metadata.
+
 **Detection Rules:**
 * **Region Identification:** An individual JSVMP instance is characterized by a self-contained block containing a **Main Loop** + **Dispatcher** + **Stack Operations**. Check if there are multiple such blocks in the code.
 * **Instruction Pointer (IP) Identification:**
@@ -197,9 +203,18 @@ The code is provided in a simplified format: \`LineNo SourceLoc Code\`.
   * Its value consistently **increments after a write** (push) and **decrements before a read** (pop).
 * **Debugging Entry Point Identification:**
   * This is the line **inside a specific dispatcher loop** but **before its \`switch\` or \`if-else\` chain begins**. It is typically located right after the \`opcode\` is read from the bytecode array.
+  * **The line number MUST be an actual LineNo from the input.** Do not invent line numbers.
 
 **Output Format:**
 Return **ONLY valid JSON**. No markdown wrapper, no conversational text.
+
+**⚠️ FINAL VERIFICATION CHECKLIST ⚠️**
+Before returning your JSON, verify:
+1. Every \`start_line\` value exists as a LineNo in the input
+2. Every \`end_line\` value exists as a LineNo in the input
+3. Every \`debugging_entry_point.line_number\` exists as a LineNo in the input
+4. \`start_line\` < \`end_line\` for each region
+5. \`debugging_entry_point.line_number\` is between \`start_line\` and \`end_line\`
 
 **Note:** The \`regions\` array should contain all identified JSVMP instances. If multiple dispatchers are found, include each one as a separate object.
 
@@ -213,8 +228,8 @@ Return **ONLY valid JSON**. No markdown wrapper, no conversational text.
   "regions": [
     {
       "instance_id": "<integer: 从1开始的实例编号>",
-      "start_line": "<start_line_integer>",
-      "end_line": "<end_line_integer>",
+      "start_line": "<start_line_integer: MUST be an actual LineNo from input>",
+      "end_line": "<end_line_integer: MUST be an actual LineNo from input>",
       "type": "<If-Else Dispatcher | Switch Dispatcher | Instruction Array>",
       "confidence": "<ultra_high | high | medium | low>",
       "description": "对这个特定JSVMP实例的简要中文描述，包括其在代码中的位置特征。",
@@ -241,7 +256,7 @@ Return **ONLY valid JSON**. No markdown wrapper, no conversational text.
         }
       },
       "debugging_entry_point": {
-        "line_number": "<line_number_integer>",
+        "line_number": "<line_number_integer: MUST be an actual LineNo from input, between start_line and end_line>",
         "description": "The optimal breakpoint line for THIS VM instance. E.g., 'This line is after the opcode is fetched and before this region's switch statement.'"
       }
     }

@@ -53,10 +53,10 @@
     "zod": "^4.2.1"
   },
   "peerDependencies": {
-    "@reverse-craft/smart-fs": "^2.0.0"
+    "@reverse-craft/smart-fs": "file:../smart-fs"
   },
   "devDependencies": {
-    "@reverse-craft/smart-fs": "^2.0.0",
+    "@reverse-craft/smart-fs": "file:../smart-fs",
     "@types/node": "^22.15.29",
     "esbuild": "^0.27.2",
     "fast-check": "^4.5.2",
