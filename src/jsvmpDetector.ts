@@ -25,8 +25,7 @@ export interface FormattedCode {
 export type DetectionType = 
   | "If-Else Dispatcher" 
   | "Switch Dispatcher" 
-  | "Instruction Array" 
-  | "Stack Operation";
+  | "Instruction Array";
 
 /**
  * Confidence level for detection results
@@ -34,21 +33,58 @@ export type DetectionType =
 export type ConfidenceLevel = "ultra_high" | "high" | "medium" | "low";
 
 /**
- * A detected region in the code
+ * VM Component variable identification
  */
-export interface DetectionRegion {
-  start: number;           // 起始行号
-  end: number;             // 结束行号
-  type: DetectionType;     // 检测类型
-  confidence: ConfidenceLevel;  // 置信度
-  description: string;     // 描述（中文）
+export interface VMComponentVariable {
+  variable_name: string | null;
+  confidence: ConfidenceLevel;
+  reasoning: string;
 }
 
 /**
- * Complete detection result from LLM analysis
+ * VM Components for a JSVMP instance
+ */
+export interface VMComponents {
+  instruction_pointer: VMComponentVariable;
+  stack_pointer: VMComponentVariable;
+  virtual_stack: VMComponentVariable;
+  bytecode_array: VMComponentVariable;
+}
+
+/**
+ * Debugging entry point information
+ */
+export interface DebuggingEntryPoint {
+  line_number: number;
+  description: string;
+}
+
+/**
+ * A detected region in the code (enhanced with VM components)
+ */
+export interface DetectionRegion {
+  start: number;           // 起始行号 (start_line)
+  end: number;             // 结束行号 (end_line)
+  type: DetectionType;     // 检测类型
+  confidence: ConfidenceLevel;  // 置信度
+  description: string;     // 描述（中文）
+  vm_components?: VMComponents;  // VM 组件变量识别
+  debugging_entry_point?: DebuggingEntryPoint;  // 调试入口点
+}
+
+/**
+ * Summary information for detection result
+ */
+export interface DetectionSummary {
+  overall_description: string;      // 总体描述
+  debugging_recommendation: string; // 调试建议
+}
+
+/**
+ * Complete detection result from LLM analysis (enhanced)
  */
 export interface DetectionResult {
-  summary: string;         // 分析摘要（中文）
+  summary: string | DetectionSummary;  // 分析摘要（支持新旧格式）
   regions: DetectionRegion[];
 }
 
@@ -321,8 +357,7 @@ export function createBatches(
 const VALID_DETECTION_TYPES: DetectionType[] = [
   "If-Else Dispatcher",
   "Switch Dispatcher",
-  "Instruction Array",
-  "Stack Operation"
+  "Instruction Array"
 ];
 
 /**
@@ -350,13 +385,87 @@ function isValidConfidenceLevel(value: unknown): value is ConfidenceLevel {
 }
 
 /**
+ * Parse VM component variable from LLM response
+ */
+function parseVMComponentVariable(obj: Record<string, unknown>, fieldName: string): VMComponentVariable | null {
+  const component = obj[fieldName] as Record<string, unknown> | undefined;
+  if (!component || typeof component !== 'object') {
+    return null;
+  }
+  
+  const variableName = component.variable_name;
+  const confidence = component.confidence;
+  const reasoning = component.reasoning;
+  
+  if (typeof confidence !== 'string' || !isValidConfidenceLevel(confidence)) {
+    return null;
+  }
+  
+  return {
+    variable_name: typeof variableName === 'string' ? variableName : null,
+    confidence,
+    reasoning: typeof reasoning === 'string' ? reasoning : '',
+  };
+}
+
+/**
+ * Parse VM components from LLM response
+ */
+function parseVMComponents(obj: Record<string, unknown>): VMComponents | undefined {
+  const vmComponents = obj.vm_components as Record<string, unknown> | undefined;
+  if (!vmComponents || typeof vmComponents !== 'object') {
+    return undefined;
+  }
+  
+  const ip = parseVMComponentVariable(vmComponents, 'instruction_pointer');
+  const sp = parseVMComponentVariable(vmComponents, 'stack_pointer');
+  const stack = parseVMComponentVariable(vmComponents, 'virtual_stack');
+  const bytecode = parseVMComponentVariable(vmComponents, 'bytecode_array');
+  
+  // Only return if at least one component is identified
+  if (!ip && !sp && !stack && !bytecode) {
+    return undefined;
+  }
+  
+  return {
+    instruction_pointer: ip ?? { variable_name: null, confidence: 'low', reasoning: '' },
+    stack_pointer: sp ?? { variable_name: null, confidence: 'low', reasoning: '' },
+    virtual_stack: stack ?? { variable_name: null, confidence: 'low', reasoning: '' },
+    bytecode_array: bytecode ?? { variable_name: null, confidence: 'low', reasoning: '' },
+  };
+}
+
+/**
+ * Parse debugging entry point from LLM response
+ */
+function parseDebuggingEntryPoint(obj: Record<string, unknown>): DebuggingEntryPoint | undefined {
+  const entryPoint = obj.debugging_entry_point as Record<string, unknown> | undefined;
+  if (!entryPoint || typeof entryPoint !== 'object') {
+    return undefined;
+  }
+  
+  const lineNumber = entryPoint.line_number;
+  const description = entryPoint.description;
+  
+  if (typeof lineNumber !== 'number') {
+    return undefined;
+  }
+  
+  return {
+    line_number: lineNumber,
+    description: typeof description === 'string' ? description : '',
+  };
+}
+
+/**
  * Parse and validate LLM detection result from JSON string
  * 
  * Validates:
  * - JSON is parseable
  * - Required fields exist: summary, regions
- * - Each region has required fields: start, end, type, confidence, description
+ * - Each region has required fields: start/start_line, end/end_line, type, confidence, description
  * - Enum values are valid
+ * - Supports both old and new JSON formats
  * 
  * @param jsonString - JSON string from LLM response
  * @returns Parsed and validated DetectionResult
@@ -378,7 +487,20 @@ export function parseDetectionResult(jsonString: string): DetectionResult {
 
   const obj = parsed as Record<string, unknown>;
 
-  if (typeof obj.summary !== 'string') {
+  // Parse summary (support both old string format and new object format)
+  let summary: string | DetectionSummary;
+  if (typeof obj.summary === 'string') {
+    summary = obj.summary;
+  } else if (typeof obj.summary === 'object' && obj.summary !== null) {
+    const summaryObj = obj.summary as Record<string, unknown>;
+    if (typeof summaryObj.overall_description !== 'string' || typeof summaryObj.debugging_recommendation !== 'string') {
+      throw new Error('LLM 响应格式无效，summary 对象缺少必需字段');
+    }
+    summary = {
+      overall_description: summaryObj.overall_description,
+      debugging_recommendation: summaryObj.debugging_recommendation,
+    };
+  } else {
     throw new Error('LLM 响应格式无效，缺少必需字段: summary');
   }
 
@@ -397,13 +519,17 @@ export function parseDetectionResult(jsonString: string): DetectionResult {
       throw new Error(`LLM 响应格式无效，regions[${i}] 不是对象`);
     }
 
+    // Support both old (start/end) and new (start_line/end_line) field names
+    const startLine = region.start_line ?? region.start;
+    const endLine = region.end_line ?? region.end;
+
     // Validate required fields exist and have correct types
-    if (typeof region.start !== 'number') {
-      throw new Error(`LLM 响应格式无效，regions[${i}] 缺少必需字段: start`);
+    if (typeof startLine !== 'number') {
+      throw new Error(`LLM 响应格式无效，regions[${i}] 缺少必需字段: start_line 或 start`);
     }
 
-    if (typeof region.end !== 'number') {
-      throw new Error(`LLM 响应格式无效，regions[${i}] 缺少必需字段: end`);
+    if (typeof endLine !== 'number') {
+      throw new Error(`LLM 响应格式无效，regions[${i}] 缺少必需字段: end_line 或 end`);
     }
 
     if (typeof region.type !== 'string') {
@@ -433,23 +559,29 @@ export function parseDetectionResult(jsonString: string): DetectionResult {
       );
     }
 
+    // Parse optional VM components and debugging entry point
+    const vmComponents = parseVMComponents(region);
+    const debuggingEntryPoint = parseDebuggingEntryPoint(region);
+
     validatedRegions.push({
-      start: region.start,
-      end: region.end,
+      start: startLine,
+      end: endLine,
       type: region.type,
       confidence: region.confidence,
       description: region.description,
+      ...(vmComponents && { vm_components: vmComponents }),
+      ...(debuggingEntryPoint && { debugging_entry_point: debuggingEntryPoint }),
     });
   }
 
   return {
-    summary: obj.summary,
+    summary,
     regions: validatedRegions,
   };
 }
 
 /**
- * Format detection result for display
+ * Format detection result for display (enhanced with VM components)
  */
 function formatDetectionResultOutput(
   result: DetectionResult,
@@ -462,14 +594,55 @@ function formatDetectionResultOutput(
   lines.push('=== JSVMP Dispatcher Detection Result ===');
   lines.push(`File: ${filePath} (${totalLines} lines, ${batchCount} batch${batchCount > 1 ? 'es' : ''})`);
   lines.push('');
-  lines.push(`Summary: ${result.summary}`);
+  
+  // Format summary (support both old string format and new object format)
+  if (typeof result.summary === 'string') {
+    lines.push(`Summary: ${result.summary}`);
+  } else {
+    lines.push(`Summary: ${result.summary.overall_description}`);
+    lines.push(`Recommendation: ${result.summary.debugging_recommendation}`);
+  }
   lines.push('');
   
   if (result.regions.length > 0) {
-    lines.push('Detected Regions:');
-    for (const region of result.regions) {
+    lines.push(`Detected Regions (${result.regions.length} JSVMP instance${result.regions.length > 1 ? 's' : ''}):`);
+    lines.push('');
+    
+    for (let i = 0; i < result.regions.length; i++) {
+      const region = result.regions[i];
+      lines.push(`--- Instance ${i + 1} ---`);
       lines.push(`[${region.confidence}] Lines ${region.start}-${region.end}: ${region.type}`);
       lines.push(`  ${region.description}`);
+      
+      // Format VM components if available
+      if (region.vm_components) {
+        lines.push('  VM Components:');
+        const { instruction_pointer, stack_pointer, virtual_stack, bytecode_array } = region.vm_components;
+        
+        if (instruction_pointer.variable_name) {
+          lines.push(`    - Instruction Pointer: ${instruction_pointer.variable_name} [${instruction_pointer.confidence}]`);
+          lines.push(`      ${instruction_pointer.reasoning}`);
+        }
+        if (stack_pointer.variable_name) {
+          lines.push(`    - Stack Pointer: ${stack_pointer.variable_name} [${stack_pointer.confidence}]`);
+          lines.push(`      ${stack_pointer.reasoning}`);
+        }
+        if (virtual_stack.variable_name) {
+          lines.push(`    - Virtual Stack: ${virtual_stack.variable_name} [${virtual_stack.confidence}]`);
+          lines.push(`      ${virtual_stack.reasoning}`);
+        }
+        if (bytecode_array.variable_name) {
+          lines.push(`    - Bytecode Array: ${bytecode_array.variable_name} [${bytecode_array.confidence}]`);
+          lines.push(`      ${bytecode_array.reasoning}`);
+        }
+      }
+      
+      // Format debugging entry point if available
+      if (region.debugging_entry_point) {
+        lines.push(`  Debugging Entry Point: Line ${region.debugging_entry_point.line_number}`);
+        lines.push(`    ${region.debugging_entry_point.description}`);
+      }
+      
       lines.push('');
     }
   } else {
@@ -500,9 +673,25 @@ export function mergeDetectionResults(results: DetectionResult[]): DetectionResu
     return { summary: results[0].summary, regions: sortedRegions };
   }
   
-  // Combine summaries
-  const summaries = results.map((r, i) => `[Batch ${i + 1}] ${r.summary}`);
-  const combinedSummary = summaries.join('\n');
+  // Combine summaries (handle both string and object formats)
+  const summaryParts: string[] = [];
+  for (let i = 0; i < results.length; i++) {
+    const summary = results[i].summary;
+    if (typeof summary === 'string') {
+      summaryParts.push(`[Batch ${i + 1}] ${summary}`);
+    } else {
+      summaryParts.push(`[Batch ${i + 1}] ${summary.overall_description}`);
+    }
+  }
+  
+  // For merged results, create a combined summary object
+  const lastSummary = results[results.length - 1].summary;
+  const combinedSummary: DetectionSummary = {
+    overall_description: summaryParts.join('\n'),
+    debugging_recommendation: typeof lastSummary === 'string' 
+      ? '请参考各批次的分析结果进行调试。'
+      : lastSummary.debugging_recommendation,
+  };
   
   // Collect all regions
   const allRegions: DetectionRegion[] = [];

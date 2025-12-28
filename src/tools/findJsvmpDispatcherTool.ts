@@ -18,10 +18,12 @@ export const FindJsvmpDispatcherInputSchema = {
  * 
  * JSVMP is a code protection technique that converts JavaScript to bytecode
  * executed by a virtual machine. This tool identifies:
+ * - Multiple independent JSVMP instances
  * - If-Else Dispatchers
  * - Switch Dispatchers  
  * - Instruction Arrays
- * - Stack Operations
+ * - VM Components (IP, SP, Stack, Bytecode Array)
+ * - Debugging Entry Points
  * 
  * Requires OPENAI_API_KEY environment variable to be set.
  */
@@ -29,15 +31,16 @@ export const findJsvmpDispatcherTool = defineTool({
   name: 'find_jsvmp_dispatcher',
   description: `Detect JSVMP (JavaScript Virtual Machine Protection) patterns in code using LLM analysis.
 
-JSVMP is a code protection technique that converts JavaScript to bytecode executed by a virtual machine. This tool identifies:
-- If-Else Dispatchers: Nested if-else chains for instruction dispatch
-- Switch Dispatchers: Large switch statements (>20 cases) for opcode handling
-- Instruction Arrays: Arrays storing bytecode instructions
-- Stack Operations: Virtual stack push/pop patterns
+JSVMP is a code protection technique that converts JavaScript to bytecode executed by a virtual machine. A single file may contain multiple independent JSVMP instances.
+
+This tool identifies for each JSVMP instance:
+- Region location and dispatcher type (If-Else Dispatcher, Switch Dispatcher, Instruction Array)
+- VM Components: Instruction Pointer (IP), Stack Pointer (SP), Virtual Stack, Bytecode Array
+- Debugging Entry Point: The optimal line number to set breakpoints
+
+Detection confidence levels: ultra_high, high, medium, low
 
 Automatically splits large files into batches based on token limits and merges results.
-
-Returns detection results with confidence levels (ultra_high, high, medium, low) and detailed descriptions.
 
 Requires OPENAI_API_KEY environment variable. Optional: OPENAI_BASE_URL, OPENAI_MODEL.`,
   schema: FindJsvmpDispatcherInputSchema,
