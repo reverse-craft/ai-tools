@@ -66,7 +66,7 @@ const detectionRegionArb = fc.record({
 /**
  * Arbitrary for generating a DetectionResult with string summary
  */
-const detectionResultArb = fc.record({
+const detectionResultArb: fc.Arbitrary<DetectionResult> = fc.record({
   summary: fc.string({ minLength: 1, maxLength: 100 }),
   regions: fc.array(detectionRegionArb, { minLength: 0, maxLength: 5 }),
 });
@@ -140,9 +140,10 @@ describe('Property 5: Merge preserves all detection regions', () => {
 
           // Each batch summary should appear in the combined summary
           for (let i = 0; i < results.length; i++) {
-            const inputSummary = typeof results[i].summary === 'string' 
-              ? results[i].summary 
-              : (results[i].summary as DetectionSummary).overall_description;
+            const summary = results[i].summary;
+            const inputSummary = typeof summary === 'string' 
+              ? summary 
+              : summary.overall_description;
             expect(summaryText).toContain(inputSummary);
             expect(summaryText).toContain(`[Batch ${i + 1}]`);
           }
