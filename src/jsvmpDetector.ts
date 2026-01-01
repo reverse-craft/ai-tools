@@ -33,26 +33,64 @@ export type DetectionType =
 export type ConfidenceLevel = "ultra_high" | "high" | "medium" | "low";
 
 /**
- * VM Component variable identification
+ * VM Component variable identification with source coordinates
  */
 export interface VMComponentVariable {
   variable_name: string | null;
+  line_number: number | null;
+  source_line: number | null;
+  source_column: number | null;
   confidence: ConfidenceLevel;
   reasoning: string;
 }
 
 /**
- * VM Components for a JSVMP instance
+ * Function entry injection point for bytecode offset calculation
+ */
+export interface FunctionEntryInjection {
+  line_number: number;
+  source_line: number | null;
+  source_column: number | null;
+  function_name: string | null;
+  description: string;
+}
+
+/**
+ * Breakpoint injection point inside dispatcher loop
+ */
+export interface BreakpointInjection {
+  line_number: number;
+  source_line: number | null;
+  source_column: number | null;
+  opcode_read_pattern: string | null;
+  description: string;
+}
+
+/**
+ * VM Components for a JSVMP instance (includes injection points)
  */
 export interface VMComponents {
   instruction_pointer: VMComponentVariable;
   stack_pointer: VMComponentVariable;
   virtual_stack: VMComponentVariable;
   bytecode_array: VMComponentVariable;
+  function_entry?: FunctionEntryInjection;
+  breakpoint?: BreakpointInjection;
 }
 
 /**
- * Debugging entry point information
+ * Global bytecode information
+ */
+export interface GlobalBytecodeInfo {
+  variable_name: string | null;
+  definition_line: number | null;
+  source_line: number | null;
+  source_column: number | null;
+  description: string;
+}
+
+/**
+ * Debugging entry point information (legacy, kept for compatibility)
  */
 export interface DebuggingEntryPoint {
   line_number: number;
@@ -68,8 +106,8 @@ export interface DetectionRegion {
   type: DetectionType;     // 检测类型
   confidence: ConfidenceLevel;  // 置信度
   description: string;     // 描述（中文）
-  vm_components?: VMComponents;  // VM 组件变量识别
-  debugging_entry_point?: DebuggingEntryPoint;  // 调试入口点
+  vm_components?: VMComponents;  // VM 组件变量识别 (包含注入点)
+  debugging_entry_point?: DebuggingEntryPoint;  // 调试入口点 (legacy)
 }
 
 /**
@@ -85,6 +123,7 @@ export interface DetectionSummary {
  */
 export interface DetectionResult {
   summary: string | DetectionSummary;  // 分析摘要（支持新旧格式）
+  global_bytecode?: GlobalBytecodeInfo;  // 全局字节码信息
   regions: DetectionRegion[];
 }
 
@@ -394,6 +433,9 @@ function parseVMComponentVariable(obj: Record<string, unknown>, fieldName: strin
   }
   
   const variableName = component.variable_name;
+  const lineNumber = component.line_number;
+  const sourceLine = component.source_line;
+  const sourceColumn = component.source_column;
   const confidence = component.confidence;
   const reasoning = component.reasoning;
   
@@ -403,13 +445,16 @@ function parseVMComponentVariable(obj: Record<string, unknown>, fieldName: strin
   
   return {
     variable_name: typeof variableName === 'string' ? variableName : null,
+    line_number: typeof lineNumber === 'number' ? lineNumber : null,
+    source_line: typeof sourceLine === 'number' ? sourceLine : null,
+    source_column: typeof sourceColumn === 'number' ? sourceColumn : null,
     confidence,
     reasoning: typeof reasoning === 'string' ? reasoning : '',
   };
 }
 
 /**
- * Parse VM components from LLM response
+ * Parse VM components from LLM response (includes injection points)
  */
 function parseVMComponents(obj: Record<string, unknown>): VMComponents | undefined {
   const vmComponents = obj.vm_components as Record<string, unknown> | undefined;
@@ -422,16 +467,50 @@ function parseVMComponents(obj: Record<string, unknown>): VMComponents | undefin
   const stack = parseVMComponentVariable(vmComponents, 'virtual_stack');
   const bytecode = parseVMComponentVariable(vmComponents, 'bytecode_array');
   
+  // Parse function_entry (now inside vm_components)
+  let functionEntry: FunctionEntryInjection | undefined;
+  const fe = vmComponents.function_entry as Record<string, unknown> | undefined;
+  if (fe && typeof fe === 'object') {
+    const lineNumber = fe.line_number;
+    if (typeof lineNumber === 'number') {
+      functionEntry = {
+        line_number: lineNumber,
+        source_line: typeof fe.source_line === 'number' ? fe.source_line : null,
+        source_column: typeof fe.source_column === 'number' ? fe.source_column : null,
+        function_name: typeof fe.function_name === 'string' ? fe.function_name : null,
+        description: typeof fe.description === 'string' ? fe.description : '',
+      };
+    }
+  }
+  
+  // Parse breakpoint (now inside vm_components)
+  let breakpointInjection: BreakpointInjection | undefined;
+  const bp = vmComponents.breakpoint as Record<string, unknown> | undefined;
+  if (bp && typeof bp === 'object') {
+    const lineNumber = bp.line_number;
+    if (typeof lineNumber === 'number') {
+      breakpointInjection = {
+        line_number: lineNumber,
+        source_line: typeof bp.source_line === 'number' ? bp.source_line : null,
+        source_column: typeof bp.source_column === 'number' ? bp.source_column : null,
+        opcode_read_pattern: typeof bp.opcode_read_pattern === 'string' ? bp.opcode_read_pattern : null,
+        description: typeof bp.description === 'string' ? bp.description : '',
+      };
+    }
+  }
+  
   // Only return if at least one component is identified
   if (!ip && !sp && !stack && !bytecode) {
     return undefined;
   }
   
   return {
-    instruction_pointer: ip ?? { variable_name: null, confidence: 'low', reasoning: '' },
-    stack_pointer: sp ?? { variable_name: null, confidence: 'low', reasoning: '' },
-    virtual_stack: stack ?? { variable_name: null, confidence: 'low', reasoning: '' },
-    bytecode_array: bytecode ?? { variable_name: null, confidence: 'low', reasoning: '' },
+    instruction_pointer: ip ?? { variable_name: null, line_number: null, source_line: null, source_column: null, confidence: 'low', reasoning: '' },
+    stack_pointer: sp ?? { variable_name: null, line_number: null, source_line: null, source_column: null, confidence: 'low', reasoning: '' },
+    virtual_stack: stack ?? { variable_name: null, line_number: null, source_line: null, source_column: null, confidence: 'low', reasoning: '' },
+    bytecode_array: bytecode ?? { variable_name: null, line_number: null, source_line: null, source_column: null, confidence: 'low', reasoning: '' },
+    ...(functionEntry && { function_entry: functionEntry }),
+    ...(breakpointInjection && { breakpoint: breakpointInjection }),
   };
 }
 
@@ -454,6 +533,24 @@ function parseDebuggingEntryPoint(obj: Record<string, unknown>): DebuggingEntryP
   return {
     line_number: lineNumber,
     description: typeof description === 'string' ? description : '',
+  };
+}
+
+/**
+ * Parse global bytecode info from LLM response
+ */
+function parseGlobalBytecode(obj: Record<string, unknown>): GlobalBytecodeInfo | undefined {
+  const globalBytecode = obj.global_bytecode as Record<string, unknown> | undefined;
+  if (!globalBytecode || typeof globalBytecode !== 'object') {
+    return undefined;
+  }
+  
+  return {
+    variable_name: typeof globalBytecode.variable_name === 'string' ? globalBytecode.variable_name : null,
+    definition_line: typeof globalBytecode.definition_line === 'number' ? globalBytecode.definition_line : null,
+    source_line: typeof globalBytecode.source_line === 'number' ? globalBytecode.source_line : null,
+    source_column: typeof globalBytecode.source_column === 'number' ? globalBytecode.source_column : null,
+    description: typeof globalBytecode.description === 'string' ? globalBytecode.description : '',
   };
 }
 
@@ -559,7 +656,7 @@ export function parseDetectionResult(jsonString: string): DetectionResult {
       );
     }
 
-    // Parse optional VM components and debugging entry point
+    // Parse optional VM components (now includes injection points) and debugging entry point
     const vmComponents = parseVMComponents(region);
     const debuggingEntryPoint = parseDebuggingEntryPoint(region);
 
@@ -574,14 +671,28 @@ export function parseDetectionResult(jsonString: string): DetectionResult {
     });
   }
 
+  // Parse global bytecode info
+  const globalBytecode = parseGlobalBytecode(obj);
+
   return {
     summary,
+    ...(globalBytecode && { global_bytecode: globalBytecode }),
     regions: validatedRegions,
   };
 }
 
 /**
- * Format detection result for display (enhanced with VM components)
+ * Format source location as "L{line}:{column}" or empty string
+ */
+function formatSourceLoc(sourceLine: number | null, sourceColumn: number | null): string {
+  if (sourceLine !== null && sourceColumn !== null) {
+    return ` [Src L${sourceLine}:${sourceColumn}]`;
+  }
+  return '';
+}
+
+/**
+ * Format detection result for display (enhanced with injection points and source coordinates)
  */
 function formatDetectionResultOutput(
   result: DetectionResult,
@@ -604,6 +715,20 @@ function formatDetectionResultOutput(
   }
   lines.push('');
   
+  // Format global bytecode info if available
+  if (result.global_bytecode) {
+    const gb = result.global_bytecode;
+    lines.push('Global Bytecode:');
+    if (gb.variable_name) {
+      const srcLoc = formatSourceLoc(gb.source_line, gb.source_column);
+      lines.push(`  Variable: ${gb.variable_name} (line ${gb.definition_line})${srcLoc}`);
+    }
+    if (gb.description) {
+      lines.push(`  ${gb.description}`);
+    }
+    lines.push('');
+  }
+  
   if (result.regions.length > 0) {
     lines.push(`Detected Regions (${result.regions.length} JSVMP instance${result.regions.length > 1 ? 's' : ''}):`);
     lines.push('');
@@ -620,25 +745,55 @@ function formatDetectionResultOutput(
         const { instruction_pointer, stack_pointer, virtual_stack, bytecode_array } = region.vm_components;
         
         if (instruction_pointer.variable_name) {
-          lines.push(`    - Instruction Pointer: ${instruction_pointer.variable_name} [${instruction_pointer.confidence}]`);
+          const srcLoc = formatSourceLoc(instruction_pointer.source_line, instruction_pointer.source_column);
+          lines.push(`    - Instruction Pointer: ${instruction_pointer.variable_name} [${instruction_pointer.confidence}]${srcLoc}`);
           lines.push(`      ${instruction_pointer.reasoning}`);
         }
         if (stack_pointer.variable_name) {
-          lines.push(`    - Stack Pointer: ${stack_pointer.variable_name} [${stack_pointer.confidence}]`);
+          const srcLoc = formatSourceLoc(stack_pointer.source_line, stack_pointer.source_column);
+          lines.push(`    - Stack Pointer: ${stack_pointer.variable_name} [${stack_pointer.confidence}]${srcLoc}`);
           lines.push(`      ${stack_pointer.reasoning}`);
         }
         if (virtual_stack.variable_name) {
-          lines.push(`    - Virtual Stack: ${virtual_stack.variable_name} [${virtual_stack.confidence}]`);
+          const srcLoc = formatSourceLoc(virtual_stack.source_line, virtual_stack.source_column);
+          lines.push(`    - Virtual Stack: ${virtual_stack.variable_name} [${virtual_stack.confidence}]${srcLoc}`);
           lines.push(`      ${virtual_stack.reasoning}`);
         }
         if (bytecode_array.variable_name) {
-          lines.push(`    - Bytecode Array: ${bytecode_array.variable_name} [${bytecode_array.confidence}]`);
+          const srcLoc = formatSourceLoc(bytecode_array.source_line, bytecode_array.source_column);
+          lines.push(`    - Bytecode Array: ${bytecode_array.variable_name} [${bytecode_array.confidence}]${srcLoc}`);
           lines.push(`      ${bytecode_array.reasoning}`);
+        }
+        
+        // Format function_entry (now inside vm_components)
+        if (region.vm_components.function_entry) {
+          const fe = region.vm_components.function_entry;
+          const srcLoc = formatSourceLoc(fe.source_line, fe.source_column);
+          lines.push(`    - Function Entry: Line ${fe.line_number}${srcLoc}`);
+          if (fe.function_name) {
+            lines.push(`      Function: ${fe.function_name}`);
+          }
+          if (fe.description) {
+            lines.push(`      ${fe.description}`);
+          }
+        }
+        
+        // Format breakpoint (now inside vm_components)
+        if (region.vm_components.breakpoint) {
+          const bp = region.vm_components.breakpoint;
+          const srcLoc = formatSourceLoc(bp.source_line, bp.source_column);
+          lines.push(`    - Breakpoint: Line ${bp.line_number}${srcLoc}`);
+          if (bp.opcode_read_pattern) {
+            lines.push(`      Opcode Read: ${bp.opcode_read_pattern}`);
+          }
+          if (bp.description) {
+            lines.push(`      ${bp.description}`);
+          }
         }
       }
       
-      // Format debugging entry point if available
-      if (region.debugging_entry_point) {
+      // Format debugging entry point if available (legacy)
+      if (region.debugging_entry_point && !region.vm_components?.breakpoint) {
         lines.push(`  Debugging Entry Point: Line ${region.debugging_entry_point.line_number}`);
         lines.push(`    ${region.debugging_entry_point.description}`);
       }
@@ -658,6 +813,7 @@ function formatDetectionResultOutput(
  * - Combines summaries from all batches
  * - Sorts regions by start line
  * - Deduplicates overlapping regions (keeps higher confidence)
+ * - Merges global_bytecode info (keeps first non-null)
  * 
  * @param results - Array of DetectionResult from each batch
  * @returns Merged DetectionResult
@@ -670,7 +826,11 @@ export function mergeDetectionResults(results: DetectionResult[]): DetectionResu
   if (results.length === 1) {
     // Still need to sort and deduplicate regions for single result
     const sortedRegions = [...results[0].regions].sort((a, b) => a.start - b.start);
-    return { summary: results[0].summary, regions: sortedRegions };
+    return { 
+      summary: results[0].summary, 
+      global_bytecode: results[0].global_bytecode,
+      regions: sortedRegions 
+    };
   }
   
   // Combine summaries (handle both string and object formats)
@@ -692,6 +852,15 @@ export function mergeDetectionResults(results: DetectionResult[]): DetectionResu
       ? '请参考各批次的分析结果进行调试。'
       : lastSummary.debugging_recommendation,
   };
+  
+  // Merge global_bytecode (keep first non-null)
+  let mergedGlobalBytecode: GlobalBytecodeInfo | undefined;
+  for (const result of results) {
+    if (result.global_bytecode && result.global_bytecode.variable_name) {
+      mergedGlobalBytecode = result.global_bytecode;
+      break;
+    }
+  }
   
   // Collect all regions
   const allRegions: DetectionRegion[] = [];
@@ -738,6 +907,7 @@ export function mergeDetectionResults(results: DetectionResult[]): DetectionResu
   
   return {
     summary: combinedSummary,
+    ...(mergedGlobalBytecode && { global_bytecode: mergedGlobalBytecode }),
     regions: deduplicatedRegions,
   };
 }

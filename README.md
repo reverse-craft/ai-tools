@@ -219,20 +219,79 @@ Detect JSVMP (JavaScript Virtual Machine Protection) patterns in code using LLM 
 - `medium` - Partial JSVMP features
 - `low` - Possible but uncertain patterns
 
+**Output Fields:**
+
+For each detected JSVMP instance, the tool returns:
+
+- **Region** - Start/end line numbers and dispatcher type
+- **VM Components** - Identified variables for IP, SP, Stack, Bytecode Array
+  - Each component includes `source_line` and `source_column` for original JS coordinates
+- **Injection Points** - Critical for breakpoint injection:
+  - `function_entry`: Line number at function start for injecting offset calculation
+  - `breakpoint`: Line number after opcode read for injecting breakpoint check
+  - Both include `source_line` and `source_column` for actual code injection
+- **Global Bytecode** - Where the global/master bytecode array is defined
+
+**Source Coordinates:**
+
+The tool provides two types of line numbers:
+- `line_number`: Beautified line number (for display/reference)
+- `source_line` + `source_column`: Original minified JS coordinates (for actual code injection)
+
+**Injection Strategy:**
+
+The tool identifies two injection points for debugging:
+
+1. **Function Entry** - Inject bytecode offset calculation:
+   ```javascript
+   // Injected at function entry (use source_line:source_column for injection)
+   var __offset = (function() {
+     var idx = globalBytecode.indexOf(bytecode[0]);
+     return idx >= 0 ? idx : 0;
+   })();
+   ```
+
+2. **Breakpoint** - Inject breakpoint check after opcode read:
+   ```javascript
+   // Injected after opcode read (use source_line:source_column for injection)
+   if (window.__bp?.has(ip + __offset - 1)) debugger;
+   ```
+
 **Example Response:**
 
 ```
 === JSVMP Dispatcher Detection Result ===
-File: ./obfuscated.js (1-500)
+File: ./obfuscated.js (1500 lines, 1 batch)
 
 Summary: 检测到典型的 JSVMP 保护结构，包含主分发器和栈操作
+Recommendation: 建议在调试入口点设置条件断点，监控 IP 和栈状态
 
-Detected Regions:
+Global Bytecode:
+  Variable: _0x1234 (line 10) [Src L1:2345]
+  全局字节码数组，包含所有VM函数的指令
+
+Detected Regions (1 JSVMP instance):
+
+--- Instance 1 ---
 [ultra_high] Lines 45-280: Switch Dispatcher
   大型 switch 语句包含 47 个 case，典型的 JSVMP 指令分发器
-
-[high] Lines 12-44: Stack Operation
-  虚拟栈初始化和操作，使用数组索引进行 push/pop
+  VM Components:
+    - Instruction Pointer: _0x5678 [high] [Src L1:5000]
+      用作字节码数组的索引，在每次循环中递增。
+    - Stack Pointer: _0x9abc [high] [Src L1:5010]
+      用作虚拟栈的索引。
+    - Virtual Stack: _0xdef0 [high] [Src L1:5020]
+      使用栈指针频繁访问的数组。
+    - Bytecode Array: _0x1111 [high] [Src L1:5030]
+      从调用者接收字节码的参数。
+  Injection Points:
+    - Function Entry: Line 46 [Src L1:4500]
+      Function: _0x2222
+      Bytecode Param: _0x1111
+      函数入口，用于注入偏移计算代码
+    - Breakpoint: Line 52 [Src L1:4800]
+      Opcode Read: var op = _0x1111[_0x5678++]
+      断点注入位置，在opcode读取之后、switch语句之前
 ```
 
 ## What is JSVMP?
