@@ -183,21 +183,30 @@ var Z = decode(base64String);  // ← global_bytecode (Z)
 X(globalBytecode, constants);  // globalBytecode is global_bytecode
 \`\`\`
 
-**1. function_entry - Function Entry Injection Point**
-- This is the function that CONTAINS the bytecode_array parameter
-- The injection point is the FIRST line inside this function body
+**1. loop_entry - Dispatcher Loop Entry Injection Point (CRITICAL)**
+- This is the FIRST line INSIDE the dispatcher loop body (while/for loop)
+- The injection point is BEFORE the opcode read statement
 - We will inject bytecode offset calculation here: \`var __offset = global_bytecode.indexOf(bytecode_array[0]);\`
-- **MUST be the same function where bytecode_array is a parameter**
+- **MUST be AFTER bytecode_array has been assigned** (not at function entry!)
+- **MUST be BEFORE the opcode read** (so offset is calculated before breakpoint check)
 
 \`\`\`javascript
-// Example: X function receives bytecode (o2) as parameter via t3
-function X(t3, ...) {  // t3[0] becomes bytecode_array (o2)
-  // ← function_entry: Right here, first line inside function
-  var o2 = t3[0];  // bytecode_array
+// Example: X function with dispatcher loop
+function X(t3, ...) {
+  var o2 = t3[0];  // bytecode_array is assigned here
   var a2 = 0;      // instruction_pointer
-  for (;;) { ... }
+  for (;;) {
+    // ← loop_entry: Right here, FIRST line inside the loop body
+    var t4 = o2[a2++];  // opcode read (breakpoint goes AFTER this)
+    if (t4 < 38) { ... }
+  }
 }
 \`\`\`
+
+**Why loop_entry instead of function_entry?**
+- At function entry, bytecode_array may NOT be assigned yet (e.g., \`var o2 = t3[0]\` hasn't executed)
+- At loop_entry, bytecode_array is GUARANTEED to be assigned
+- The offset calculation only needs to run once (first iteration), but placing it at loop start is safe
 
 **2. breakpoint - Breakpoint Injection Point**
 - This is INSIDE the dispatcher loop, AFTER reading opcode from bytecode_array using instruction_pointer
@@ -214,11 +223,11 @@ for (;;) {
 }
 \`\`\`
 
-**Relationship between global_bytecode and bytecode_array:**
+**Relationship between global_bytecode, bytecode_array, and injection points:**
 - global_bytecode: The master array containing ALL bytecode (defined outside dispatcher)
 - bytecode_array: The local reference inside dispatcher (may be same as global_bytecode or a slice)
-- At function_entry, we inject: \`var __offset = global_bytecode.indexOf(bytecode_array[0]);\`
-- At breakpoint, we inject: \`if (__bp.has(instruction_pointer + __offset - 1)) debugger;\`
+- At loop_entry (INSIDE dispatcher loop, BEFORE opcode read), we inject: \`var __offset = global_bytecode.indexOf(bytecode_array[0]);\`
+- At breakpoint (AFTER opcode read), we inject: \`if (__bp.has(instruction_pointer + __offset - 1)) debugger;\`
 
 **Task:**
 Your primary task is to analyze the provided JavaScript code to identify **all JSVMP instances** and locate the **injection points** for each one.
@@ -280,10 +289,11 @@ The SourceLoc format is \`L{line}:{column}\`. You MUST parse it correctly:
 * **Stack Pointer (SP) Identification:**
   * It is used as the **index for the Virtual Stack array**.
   * Its value consistently **increments after a write** (push) and **decrements before a read** (pop).
-* **function_entry Identification:**
-  * Find the function that receives bytecode_array as a parameter (directly or via a container like t3[0]).
-  * The line_number is the FIRST line inside this function body.
-  * function_name should match the function containing bytecode_array.
+* **loop_entry Identification (CRITICAL):**
+  * Find the dispatcher loop (while/for) that contains the opcode read.
+  * The line_number is the FIRST line INSIDE the loop body, BEFORE the opcode read.
+  * This ensures bytecode_array is already assigned when offset is calculated.
+  * **DO NOT use function entry** - bytecode_array may not be assigned yet at function entry!
 * **breakpoint Identification:**
   * This is INSIDE the dispatcher loop, AFTER the opcode is read.
   * The opcode_read_pattern MUST reference bytecode_array and instruction_pointer.
@@ -298,8 +308,8 @@ Before returning your JSON, verify:
 1. Every \`line_number\` exists as a LineNo in the input
 2. Every \`source_line\` and \`source_column\` is correctly parsed from the corresponding SourceLoc
 3. \`start_line\` < \`end_line\` for each region
-4. \`function_entry.line_number\` is at or near the start of the dispatcher function
-5. \`breakpoint.line_number\` is inside the dispatcher loop, after opcode read
+4. \`loop_entry.line_number\` is INSIDE the dispatcher loop, BEFORE opcode read
+5. \`breakpoint.line_number\` is inside the dispatcher loop, AFTER opcode read
 
 **JSON Schema:**
 {
@@ -356,12 +366,11 @@ Before returning your JSON, verify:
           "confidence": "<high | medium | low>",
           "reasoning": "中文解释"
         },
-        "function_entry": {
-          "line_number": "<integer: first line inside the function that contains bytecode_array parameter>",
+        "loop_entry": {
+          "line_number": "<integer: FIRST line inside dispatcher loop body, BEFORE opcode read>",
           "source_line": "<integer | null>",
           "source_column": "<integer | null>",
-          "function_name": "<string | null>",
-          "description": "中文描述：这是包含 bytecode_array 参数的函数入口"
+          "description": "中文描述：这是 dispatcher 循环体的第一行，在读取 opcode 之前"
         },
         "breakpoint": {
           "line_number": "<integer: line AFTER reading instruction_pointer from bytecode_array>",

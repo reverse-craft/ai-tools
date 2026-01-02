@@ -45,13 +45,13 @@ export interface VMComponentVariable {
 }
 
 /**
- * Function entry injection point for bytecode offset calculation
+ * Loop entry injection point for bytecode offset calculation
+ * This is INSIDE the dispatcher loop, BEFORE the opcode read
  */
-export interface FunctionEntryInjection {
+export interface LoopEntryInjection {
   line_number: number;
   source_line: number | null;
   source_column: number | null;
-  function_name: string | null;
   description: string;
 }
 
@@ -74,7 +74,7 @@ export interface VMComponents {
   stack_pointer: VMComponentVariable;
   virtual_stack: VMComponentVariable;
   bytecode_array: VMComponentVariable;
-  function_entry?: FunctionEntryInjection;
+  loop_entry?: LoopEntryInjection;
   breakpoint?: BreakpointInjection;
 }
 
@@ -467,18 +467,17 @@ function parseVMComponents(obj: Record<string, unknown>): VMComponents | undefin
   const stack = parseVMComponentVariable(vmComponents, 'virtual_stack');
   const bytecode = parseVMComponentVariable(vmComponents, 'bytecode_array');
   
-  // Parse function_entry (now inside vm_components)
-  let functionEntry: FunctionEntryInjection | undefined;
-  const fe = vmComponents.function_entry as Record<string, unknown> | undefined;
-  if (fe && typeof fe === 'object') {
-    const lineNumber = fe.line_number;
+  // Parse loop_entry (now inside vm_components)
+  let loopEntry: LoopEntryInjection | undefined;
+  const le = vmComponents.loop_entry as Record<string, unknown> | undefined;
+  if (le && typeof le === 'object') {
+    const lineNumber = le.line_number;
     if (typeof lineNumber === 'number') {
-      functionEntry = {
+      loopEntry = {
         line_number: lineNumber,
-        source_line: typeof fe.source_line === 'number' ? fe.source_line : null,
-        source_column: typeof fe.source_column === 'number' ? fe.source_column : null,
-        function_name: typeof fe.function_name === 'string' ? fe.function_name : null,
-        description: typeof fe.description === 'string' ? fe.description : '',
+        source_line: typeof le.source_line === 'number' ? le.source_line : null,
+        source_column: typeof le.source_column === 'number' ? le.source_column : null,
+        description: typeof le.description === 'string' ? le.description : '',
       };
     }
   }
@@ -509,7 +508,7 @@ function parseVMComponents(obj: Record<string, unknown>): VMComponents | undefin
     stack_pointer: sp ?? { variable_name: null, line_number: null, source_line: null, source_column: null, confidence: 'low', reasoning: '' },
     virtual_stack: stack ?? { variable_name: null, line_number: null, source_line: null, source_column: null, confidence: 'low', reasoning: '' },
     bytecode_array: bytecode ?? { variable_name: null, line_number: null, source_line: null, source_column: null, confidence: 'low', reasoning: '' },
-    ...(functionEntry && { function_entry: functionEntry }),
+    ...(loopEntry && { loop_entry: loopEntry }),
     ...(breakpointInjection && { breakpoint: breakpointInjection }),
   };
 }
@@ -765,16 +764,13 @@ function formatDetectionResultOutput(
           lines.push(`      ${bytecode_array.reasoning}`);
         }
         
-        // Format function_entry (now inside vm_components)
-        if (region.vm_components.function_entry) {
-          const fe = region.vm_components.function_entry;
-          const srcLoc = formatSourceLoc(fe.source_line, fe.source_column);
-          lines.push(`    - Function Entry: Line ${fe.line_number}${srcLoc}`);
-          if (fe.function_name) {
-            lines.push(`      Function: ${fe.function_name}`);
-          }
-          if (fe.description) {
-            lines.push(`      ${fe.description}`);
+        // Format loop_entry (now inside vm_components)
+        if (region.vm_components.loop_entry) {
+          const le = region.vm_components.loop_entry;
+          const srcLoc = formatSourceLoc(le.source_line, le.source_column);
+          lines.push(`    - Loop Entry: Line ${le.line_number}${srcLoc}`);
+          if (le.description) {
+            lines.push(`      ${le.description}`);
           }
         }
         

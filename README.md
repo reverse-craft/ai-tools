@@ -227,7 +227,7 @@ For each detected JSVMP instance, the tool returns:
 - **VM Components** - Identified variables for IP, SP, Stack, Bytecode Array
   - Each component includes `source_line` and `source_column` for original JS coordinates
 - **Injection Points** - Critical for breakpoint injection:
-  - `function_entry`: Line number at function start for injecting offset calculation
+  - `loop_entry`: Line number at dispatcher loop start for injecting offset calculation
   - `breakpoint`: Line number after opcode read for injecting breakpoint check
   - Both include `source_line` and `source_column` for actual code injection
 - **Global Bytecode** - Where the global/master bytecode array is defined
@@ -242,9 +242,9 @@ The tool provides two types of line numbers:
 
 The tool identifies two injection points for debugging:
 
-1. **Function Entry** - Inject bytecode offset calculation:
+1. **Loop Entry** - Inject bytecode offset calculation (inside dispatcher loop, before opcode read):
    ```javascript
-   // Injected at function entry (use source_line:source_column for injection)
+   // Injected at loop entry (use source_line:source_column for injection)
    var __offset = (function() {
      var idx = globalBytecode.indexOf(bytecode[0]);
      return idx >= 0 ? idx : 0;
