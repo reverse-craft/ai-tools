@@ -266,6 +266,56 @@ dispatcher(GLOBAL_BC.slice(startB, endB), ...);  // Function B
 - For 1D Slice: it's the parameter or variable that holds the slice
 - Example: In \`var o2 = t3[0]\`, if t3 is global_bytecode, then o2 is local_bytecode_var
 
+**⚠️ CRITICAL: Global Bytecode Structure Identification ⚠️**
+
+The global bytecode variable may contain additional metadata beyond just the bytecode arrays.
+You MUST identify the internal structure and provide a transform expression.
+
+**Common Bytecode Structures:**
+
+**Structure 1: Simple Array of Bytecode Arrays (No transform needed)**
+\`\`\`javascript
+var GLOBAL_BC = [
+  [opcode, operand, ...],  // Function 0 bytecode
+  [opcode, operand, ...],  // Function 1 bytecode
+];
+// transform_expression = "GLOBAL_BC" (variable name itself)
+// structure_description = "简单的二维数组，每个元素直接是 bytecode 数组"
+\`\`\`
+
+**Structure 2: Array with Bytecode at Index 0**
+\`\`\`javascript
+var GLOBAL_BC = [
+  [bytecode_array, flags, boolean, metadata],  // GLOBAL_BC[i][0] = bytecode
+  [bytecode_array, flags, boolean, metadata],
+];
+// transform_expression = "GLOBAL_BC.map(x=>x[0])"
+// structure_description = "每个元素是 [bytecode, flags, boolean, metadata] 结构，bytecode 在 index 0"
+\`\`\`
+
+**Structure 3: Array with Named Property**
+\`\`\`javascript
+var GLOBAL_BC = [
+  { bytecode: [...], flags: 0, meta: {} },
+  { bytecode: [...], flags: 1, meta: {} },
+];
+// transform_expression = "GLOBAL_BC.map(x=>x.bytecode)"
+// structure_description = "每个元素是对象，bytecode 在 .bytecode 属性"
+\`\`\`
+
+**How to identify the structure:**
+1. Look at how the dispatcher accesses the bytecode: \`var bc = globalVar[index][0]\` suggests index 0
+2. Look at the array initialization or assignment patterns
+3. If bytecode is accessed directly as \`globalVar[index]\`, no transform needed
+4. If bytecode is accessed as \`globalVar[index][N]\` or \`globalVar[index].prop\`, transform is needed
+
+**Transform Expression Rules:**
+- The expression MUST be valid JavaScript that can be evaluated at runtime
+- Use compact format without spaces: \`GLOBAL_BC.map(x=>x[0])\` NOT \`GLOBAL_BC.map(x => x[0])\`
+- For simple arrays, use the variable name itself: \`GLOBAL_BC\`
+- For index access, use map: \`GLOBAL_BC.map(x=>x[N])\` where N is the index
+- For property access, use map: \`GLOBAL_BC.map(x=>x.propName)\`
+
 **1. loop_entry - Dispatcher Loop Entry Injection Point (CRITICAL)**
 - This is the FIRST line INSIDE the dispatcher loop body (while/for loop)
 - The injection point is BEFORE the opcode read statement
@@ -408,6 +458,8 @@ Before returning your JSON, verify:
     "source_column": "<integer | null>",
     "pattern_type": "<'2d_array' | '1d_slice' | 'unknown'>",
     "local_bytecode_var": "<string | null: the variable name used inside dispatcher to reference bytecode>",
+    "transform_expression": "<string | null: JavaScript expression to convert global bytecode to pure bytecode array, e.g., 'z' or 'z.map(x=>x[0])'>",
+    "structure_description": "<string | null: Chinese description of the identified bytecode structure>",
     "description": "中文描述"
   },
   "regions": [

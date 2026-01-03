@@ -86,6 +86,10 @@ export interface GlobalBytecodeInfo {
   definition_line: number | null;
   source_line: number | null;
   source_column: number | null;
+  pattern_type?: '2d_array' | '1d_slice' | 'unknown';
+  local_bytecode_var?: string | null;
+  transform_expression?: string | null;
+  structure_description?: string | null;
   description: string;
 }
 
@@ -721,6 +725,18 @@ function formatDetectionResultOutput(
     if (gb.variable_name) {
       const srcLoc = formatSourceLoc(gb.source_line, gb.source_column);
       lines.push(`  Variable: ${gb.variable_name} (line ${gb.definition_line})${srcLoc}`);
+    }
+    if (gb.pattern_type) {
+      lines.push(`  Pattern: ${gb.pattern_type}`);
+    }
+    if (gb.local_bytecode_var) {
+      lines.push(`  Local Bytecode Var: ${gb.local_bytecode_var}`);
+    }
+    if (gb.transform_expression) {
+      lines.push(`  Transform: ${gb.transform_expression}`);
+    }
+    if (gb.structure_description) {
+      lines.push(`  Structure: ${gb.structure_description}`);
     }
     if (gb.description) {
       lines.push(`  ${gb.description}`);
