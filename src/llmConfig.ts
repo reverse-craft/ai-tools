@@ -183,6 +183,89 @@ var Z = decode(base64String);  // ← global_bytecode (Z)
 X(globalBytecode, constants);  // globalBytecode is global_bytecode
 \`\`\`
 
+**⚠️ CRITICAL: Global Bytecode Pattern Types ⚠️**
+
+Global bytecode can be organized in TWO different patterns. You MUST identify which pattern is used:
+
+**Pattern 1: 2D Array (二维数组形态) - pattern_type = "2d_array"**
+- Global bytecode is an **array of arrays**, where each element is a function's bytecode
+- The dispatcher receives a **function index** and accesses \`GLOBAL_BC[func_index]\`
+- Offset calculation: Find which function index the local bytecode corresponds to
+- The offset represents the **function index**, not a byte offset
+
+\`\`\`javascript
+// Generic Example: 2D Array Pattern
+var GLOBAL_BC = [
+  [opcode, operand, ...],  // Function 0 bytecode array
+  [opcode, operand, ...],  // Function 1 bytecode array
+  [opcode, operand, ...],  // Function 2 bytecode array
+  // ... more function bytecode arrays
+];
+
+function dispatcher(funcIndex, ...) {
+  var LOCAL_BC = GLOBAL_BC[funcIndex];  // local bytecode = GLOBAL_BC[funcIndex]
+  var IP = 0;  // Instruction Pointer
+  for (;;) {
+    var opcode = LOCAL_BC[IP++];  // read opcode from local bytecode
+    // dispatch logic...
+  }
+}
+
+// Offset calculation for 2D Array:
+// __offset = funcIndex (the index used to access GLOBAL_BC)
+// Or: __offset = GLOBAL_BC.findIndex(arr => arr === LOCAL_BC)
+\`\`\`
+
+**Pattern 2: 1D Slice (一维切片形态) - pattern_type = "1d_slice"**
+- Global bytecode is a **single flat array** containing all instructions concatenated
+- The dispatcher receives a **slice/view** of this array (or the array itself with a start offset)
+- Offset calculation: Find where the local bytecode slice starts in the global array
+- The offset represents a **byte/element offset** within the flat array
+
+\`\`\`javascript
+// Generic Example: 1D Slice Pattern
+var GLOBAL_BC = [opcode, operand, opcode, operand, ...];  // All bytecode concatenated
+
+function dispatcher(bytecodeSlice, ...) {
+  var LOCAL_BC = bytecodeSlice;  // local bytecode is a slice/view
+  var IP = 0;  // Instruction Pointer (relative to slice start)
+  for (;;) {
+    var opcode = LOCAL_BC[IP++];  // read opcode
+    // dispatch logic...
+  }
+}
+
+// Called with slices:
+dispatcher(GLOBAL_BC.slice(startA, endA), ...);  // Function A
+dispatcher(GLOBAL_BC.slice(startB, endB), ...);  // Function B
+
+// Offset calculation for 1D Slice:
+// __offset = position where LOCAL_BC[0] appears in GLOBAL_BC (sliding window match)
+\`\`\`
+
+**Detection Heuristics for Pattern Type:**
+
+1. **2D Array Pattern indicators (pattern_type = "2d_array"):**
+   - Global variable is accessed with a numeric index: \`GLOBAL_BC[index]\`
+   - The index is passed as a parameter or computed from function ID
+   - Each element of the global array is itself an array (array of arrays)
+   - Local bytecode is assigned by indexing: \`LOCAL_BC = GLOBAL_BC[n]\`
+   - Look for patterns like: \`var bc = globalArray[funcId]\` or \`bytecode = G[i]\`
+
+2. **1D Slice Pattern indicators (pattern_type = "1d_slice"):**
+   - Global variable is passed directly or sliced: \`GLOBAL_BC.slice(start, end)\`
+   - Local bytecode is assigned from a parameter that receives the slice
+   - No function index lookup, just direct array reference or slice
+   - Global array is flat (not array of arrays)
+   - May use \`.subarray()\` for TypedArrays or \`.slice()\` for regular arrays
+   - Look for patterns like: \`dispatcher(globalBC.slice(a, b))\` or direct parameter passing
+
+**⚠️ You MUST also identify the local_bytecode_var:**
+- This is the variable name used INSIDE the dispatcher to reference the bytecode
+- For 2D Array: it's the variable assigned from \`GLOBAL_BC[index]\`
+- For 1D Slice: it's the parameter or variable that holds the slice
+- Example: In \`var o2 = t3[0]\`, if t3 is global_bytecode, then o2 is local_bytecode_var
+
 **1. loop_entry - Dispatcher Loop Entry Injection Point (CRITICAL)**
 - This is the FIRST line INSIDE the dispatcher loop body (while/for loop)
 - The injection point is BEFORE the opcode read statement
@@ -323,6 +406,8 @@ Before returning your JSON, verify:
     "definition_line": "<integer | null>",
     "source_line": "<integer | null>",
     "source_column": "<integer | null>",
+    "pattern_type": "<'2d_array' | '1d_slice' | 'unknown'>",
+    "local_bytecode_var": "<string | null: the variable name used inside dispatcher to reference bytecode>",
     "description": "中文描述"
   },
   "regions": [
